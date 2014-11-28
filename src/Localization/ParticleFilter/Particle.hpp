@@ -21,38 +21,47 @@
 // ANY KIND, either express or implied. See the Licence for the specific    *
 // language governing permissions and limitations at                        *
 // https://www.lsts.pt/dune/licence.                                        *
+//                                                                          *
 //***************************************************************************
-// Author: Ricardo Martins                                                  *
-//***************************************************************************
-// Automatically generated.                                                 *
-//***************************************************************************
-// IMC XML MD5: e07a0071cf6357872796799de8736a6a                            *
+// Author: Frederic Leishman                                                *
 //***************************************************************************
 
-#ifndef DUNE_IMC_CONSTANTS_HPP_INCLUDED_
-#define DUNE_IMC_CONSTANTS_HPP_INCLUDED_
+#ifndef _PARTICLE_HPP_INCLUDE_
+#define _PARTICLE_HPP_INCLUDE_
 
-//! IMC version string.
-#define DUNE_IMC_CONST_VERSION "5.4.3"
-//! Git repository information.
-#define DUNE_IMC_CONST_GIT_INFO "2014-11-12 a88a98e  (HEAD, origin/master, origin/HEAD, master)"
-//! MD5 sum of XML specification file.
-#define DUNE_IMC_CONST_MD5 "e07a0071cf6357872796799de8736a6a"
-//! Synchronization number.
-#define DUNE_IMC_CONST_SYNC 0xFE54
-//! Reversed synchronization number.
-#define DUNE_IMC_CONST_SYNC_REV 0x54FE
-//! Size of the header in bytes.
-#define DUNE_IMC_CONST_HEADER_SIZE 20
-//! Size of the footer in bytes.
-#define DUNE_IMC_CONST_FOOTER_SIZE 2
-//! Identification number of the null message.
-#define DUNE_IMC_CONST_NULL_ID 65535
-//! Maximum message data size.
-#define DUNE_IMC_CONST_MAX_SIZE 65535
-//! Unknown entity identifier.
-#define DUNE_IMC_CONST_UNK_EID 255
-//! System entity identifier.
-#define DUNE_IMC_CONST_SYS_EID 0
+class Particle
+{
+public:
+    //! Constructor (initial position)
+    Particle(double x, double y, double z, double phi, double theta, double psi);
+
+    //! Destructor
+    ~Particle();
+
+public:
+
+    double x;
+    double y;
+    double z;
+
+    double phi;
+    double theta;
+    double psi;
+
+    double weight;
+
+    struct Observation
+    {
+        // DVL
+        double dvl[4];
+
+        // Multibeam
+        double multibeam[120];
+
+        // Sidescan
+        double sidescan[200];
+    } obs;
+};
 
 #endif
+

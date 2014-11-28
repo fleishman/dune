@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: 4ab0411c6256574a5ac1785347d0a9f2                            *
+// IMC XML MD5: e07a0071cf6357872796799de8736a6a                            *
 //***************************************************************************
 
 #ifndef DUNE_IMC_MACROS_HPP_INCLUDED_
@@ -484,6 +484,10 @@
 #define DUNE_IMC_FORMCTRLPARAM 820
 //! FormationEval identification number.
 #define DUNE_IMC_FORMATIONEVAL 821
+//! CorrectedState identification number.
+#define DUNE_IMC_CORRECTEDSTATE 850
+//! DataParticle identification number.
+#define DUNE_IMC_DATAPARTICLE 851
 //! MessagePart identification number.
 #define DUNE_IMC_MESSAGEPART 877
 //! NeptusBlob identification number.

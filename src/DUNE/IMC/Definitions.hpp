@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: 4ab0411c6256574a5ac1785347d0a9f2                            *
+// IMC XML MD5: e07a0071cf6357872796799de8736a6a                            *
 //***************************************************************************
 
 #ifndef DUNE_IMC_DEFINITIONS_HPP_INCLUDED_
@@ -18053,6 +18053,174 @@ namespace DUNE
       getFixedSerializationSize(void) const
       {
         return 12;
+      }
+
+      void
+      fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
+    };
+
+    //! Corrected State.
+    class CorrectedState: public Message
+    {
+    public:
+      //! Latitude (WGS-84).
+      fp64_t lat;
+      //! Longitude (WGS-84).
+      fp64_t lon;
+      //! Height (WGS-84).
+      fp32_t height;
+      //! Offset north.
+      fp32_t x;
+      //! Offset east.
+      fp32_t y;
+      //! Offset down.
+      fp32_t z;
+      //! Rotation over x axis.
+      fp32_t phi;
+      //! Rotation over y axis.
+      fp32_t theta;
+      //! Rotation over z axis.
+      fp32_t psi;
+      //! Body-Fixed xx Velocity.
+      fp32_t u;
+      //! Body-Fixed yy Velocity.
+      fp32_t v;
+      //! Body-Fixed zz Velocity.
+      fp32_t w;
+      //! Ground Velocity X (North).
+      fp32_t vx;
+      //! Ground Velocity Y (East).
+      fp32_t vy;
+      //! Ground Velocity Z (Down).
+      fp32_t vz;
+      //! Angular Velocity in x.
+      fp32_t p;
+      //! Angular Velocity in y.
+      fp32_t q;
+      //! Angular Velocity in z.
+      fp32_t r;
+      //! Depth.
+      fp32_t depth;
+      //! Altitude.
+      fp32_t alt;
+
+      static uint16_t
+      getIdStatic(void)
+      {
+        return 850;
+      }
+
+      CorrectedState(void);
+
+      Message*
+      clone(void) const
+      {
+        return new CorrectedState(*this);
+      }
+
+      void
+      clear(void);
+
+      bool
+      fieldsEqual(const Message& msg__) const;
+
+      int
+      validate(void) const;
+
+      uint8_t*
+      serializeFields(uint8_t* bfr__) const;
+
+      uint16_t
+      deserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      getId(void) const
+      {
+        return CorrectedState::getIdStatic();
+      }
+
+      const char*
+      getName(void) const
+      {
+        return "CorrectedState";
+      }
+
+      unsigned
+      getFixedSerializationSize(void) const
+      {
+        return 88;
+      }
+
+      void
+      fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
+    };
+
+    //! Data Particle.
+    class DataParticle: public Message
+    {
+    public:
+      //! NumParticle.
+      uint16_t num;
+      //! Data.
+      std::vector<char> data;
+
+      static uint16_t
+      getIdStatic(void)
+      {
+        return 851;
+      }
+
+      DataParticle(void);
+
+      Message*
+      clone(void) const
+      {
+        return new DataParticle(*this);
+      }
+
+      void
+      clear(void);
+
+      bool
+      fieldsEqual(const Message& msg__) const;
+
+      int
+      validate(void) const;
+
+      uint8_t*
+      serializeFields(uint8_t* bfr__) const;
+
+      uint16_t
+      deserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      getId(void) const
+      {
+        return DataParticle::getIdStatic();
+      }
+
+      const char*
+      getName(void) const
+      {
+        return "DataParticle";
+      }
+
+      unsigned
+      getFixedSerializationSize(void) const
+      {
+        return 2;
+      }
+
+      unsigned
+      getVariableSerializationSize(void) const
+      {
+        return IMC::getSerializationSize(data);
       }
 
       void
