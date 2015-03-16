@@ -21,45 +21,69 @@
 // ANY KIND, either express or implied. See the Licence for the specific    *
 // language governing permissions and limitations at                        *
 // https://www.lsts.pt/dune/licence.                                        *
+//                                                                          *
 //***************************************************************************
-// Author: Ricardo Martins                                                  *
-//***************************************************************************
-// Automatically generated.                                                 *
-//***************************************************************************
-// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
+// Author: Frederic Leishman                                                *
 //***************************************************************************
 
-#ifndef DUNE_IMC_HEADER_HPP_INCLUDED_
-#define DUNE_IMC_HEADER_HPP_INCLUDED_
+#include <DUNE/DUNE.hpp>
+#include <DUNE/Math.hpp>
 
-// DUNE headers.
-#include <DUNE/Config.hpp>
+#include <Localization/ParticleFilter/Observation.hpp>
 
-namespace DUNE
+namespace Localization
 {
-  namespace IMC
-  {
-    //! Header format.
-    struct Header
+    namespace ParticleFilter
     {
-      //! Synchronization Number.
-      uint16_t sync;
-      //! Message Identification Number.
-      uint16_t mgid;
-      //! Message size.
-      uint16_t size;
-      //! Time stamp.
-      fp64_t timestamp;
-      //! Source Address.
-      uint16_t src;
-      //! Source Entity.
-      uint8_t src_ent;
-      //! Destination Address.
-      uint16_t dst;
-      //! Destination Entity.
-      uint8_t dst_ent;
-    };
-  }
+        //! Constructor
+        Observation::Observation(Observation_Properties observation_properties)
+        {
+            //Get the header
+            properties = observation_properties;
+
+            // Allocation of the observation structure
+            ray = (struct Ray*)malloc(properties.num_beam*sizeof*ray);
+
+            for(int n=0;n<properties.num_beam;n++)
+            {
+                ray[n].range = -1;
+                ray[n].angle = -1;
+                ray[n].intensity = -1;
+            }
+
+            if(properties.num_segment>0)
+            {
+                //Allocation of the observation segmentation
+                seg = (struct Segment*)malloc(properties.num_segment*sizeof*seg);
+
+                double angle_sector_size = properties.angle_width/properties.num_segment;
+
+                seg[0].value = -1;
+                seg[0].min_angle = -properties.angle_width/2;
+                seg[0].max_angle = seg[0].min_angle + angle_sector_size;
+                seg[0].angle = seg[0].min_angle + angle_sector_size/2;
+
+                for(int n=1;n<properties.num_segment;n++)
+                {
+                    seg[n].value = -1;
+                    seg[n].min_angle = seg[n-1].max_angle;
+                    seg[n].max_angle = seg[n].min_angle + angle_sector_size;
+                    seg[n].angle = seg[n].min_angle + angle_sector_size/2;
+                }
+            }
+        }
+
+        //! Destructor
+        Observation::~Observation()
+        {
+        }
+
+        //! Get the observation kind
+        int
+        Observation::GetType()
+        {
+            return properties.type;
+        }
+    }
 }
 
-#endif

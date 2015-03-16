@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: e07a0071cf6357872796799de8736a6a                            *
+// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
 //***************************************************************************
 
 MESSAGE(1, EntityState)
@@ -257,6 +257,9 @@ MESSAGE(820, FormCtrlParam)
 MESSAGE(821, FormationEval)
 MESSAGE(850, CorrectedState)
 MESSAGE(851, DataParticle)
+MESSAGE(852, DataMBS)
+MESSAGE(860, SensoriMotorState)
+MESSAGE(861, SensoriMotorPath)
 MESSAGE(877, MessagePart)
 MESSAGE(888, NeptusBlob)
 MESSAGE(889, Aborted)

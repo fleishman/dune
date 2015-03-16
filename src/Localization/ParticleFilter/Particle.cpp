@@ -29,19 +29,23 @@
 #include <DUNE/DUNE.hpp>
 #include <DUNE/Math.hpp>
 
-#include "Particle.hpp"
+#include <Localization/ParticleFilter/Particle.hpp>
 
-Particle::Particle(double x0, double y0, double z0, double phi0, double theta0, double psi0)
+namespace Localization
 {
-    x = x0;
-    y = y0;
-    z = z0;
+    namespace ParticleFilter
+    {
 
-    phi = phi0;
-    theta = theta0;
-    psi = psi0;
-}
+        Particle::Particle(Observation_Properties observation_properties, State_Properties state_properties, double initial_weight)
+        {
+            observation = new Observation(observation_properties);
+            state = new State(state_properties);
+            weight = initial_weight;
+        }
 
-Particle::~Particle()
-{
+        Particle::~Particle()
+        {
+        }
+
+    }
 }

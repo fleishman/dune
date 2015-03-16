@@ -26,41 +26,95 @@
 // Author: Frederic Leishman                                                *
 //***************************************************************************
 
-#ifndef _LOCA_PF_PARTICLE_HPP_INCLUDE_
-#define _LOCA_PF_PARTICLE_HPP_INCLUDE_
+#ifndef _LOCA_PF_MAP_HPP_INCLUDE_
+#define _LOCA_PF_MAP_HPP_INCLUDE_
 
-// DUNE headers
-#include <DUNE/DUNE.hpp>
-#include <DUNE/Math.hpp>
-
-#include <Localization/ParticleFilter/State.hpp>
-#include <Localization/ParticleFilter/Observation.hpp>
+#include <Localization/ParticleFilter/KdTree.hpp>
 
 namespace Localization
 {
     namespace ParticleFilter
     {
 
-        class Particle
+        struct Coord_Reference
+        {
+            // LLH coordinates
+            double latitude;
+            double longitude;
+            double height;
+
+            // NED coordinates
+            double North;
+            double East;
+            double Down;
+
+            // Correction offset after ground checking
+            double offset_down_corrected;
+        };
+
+        struct Map_Properties
+        {
+            // Kind of map
+            int type;
+
+            // Path of the map file (if exist)
+            char* path_file;
+
+            // Range of extraction point in kdtree (if required)
+            double extration_range;
+
+            // Time for the DVL ground scanning (vertical offset of correction)
+            double time_offset_scanning;
+
+            // Coordinate use as mission reference
+            Coord_Reference mission_reference;
+        };
+
+        struct PointListNED
+        {
+            // Map Reference and properties
+            Coord_Reference map_ref;
+            double range;
+
+            // Tree and its size
+            int num_pts;
+            KdTree *data_tree;
+
+            // Dataset returned
+            int num_pts_set;
+            double **dataset;
+        };
+
+
+        class Map
         {
         public:
-            //! Constructor (initial position)
-            Particle(Observation_Properties observation_properties, State_Properties state_properties, double initial_weight);
+            //! Constructor
+            Map(Map_Properties map_properties);
 
             //! Destructor
-            ~Particle();
+            ~Map();
+
+            //! Map Initialisation
+            int
+            Initialisation();
+
+        private:
+
+            //! Get the NED point list, and build the map datatree
+            int
+            GetListPointNed();
 
         public:
-            Observation *observation;
-            State *state;
-            double weight;
 
-            Matrix translation_map;
-            Matrix rotation_map;
+            // Map properties (define type and parameters of the map)
+            Map_Properties properties;
+
+            // Data for NED list point map
+            PointListNED pts_list;
 
         };
     }
 }
 
 #endif
-

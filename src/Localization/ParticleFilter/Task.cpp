@@ -29,8 +29,7 @@
 #include <DUNE/DUNE.hpp>
 #include <DUNE/Math.hpp>
 
-#include "KdTree.hpp"
-#include "Particle.hpp"
+#include <Localization/ParticleFilter/Filter_SIR.hpp>
 
 namespace Localization
 {
@@ -64,81 +63,20 @@ namespace Localization
         double time_heightoffset;
     };
 
-    struct Coord_Reference
-    {
-        // LLH coordinates
-        double latitude;
-        double longitude;
-        double height;
-
-        // NED coordinates
-        double North;
-        double East;
-        double Down;
-
-        // Correction offset after ground checking
-        double offset_down_corrected;
-    };
-
-    struct Dvl_Distance
-    {
-        static const int MAX_DVL_VALUE = 5;
-        double distance[MAX_DVL_VALUE];
-    };
-
-    struct PointListNED
-    {
-        Coord_Reference map_ref;
-
-        int num_pts;
-        KdTree *data_tree;
-
-        int num_pts_set;
-        double **dataset;
-        double range;
-    };
-
-    struct ParticleFilter
-    {
-        static const int MAX_PARTICLE = 9999;
-
-        Particle *particle[MAX_PARTICLE];
-        Particle *particle_selected[MAX_PARTICLE];
-
-        int num_particle;
-        int num_significant_particle;
-
-        double sum_weight[MAX_PARTICLE+1];
-
-        IMC::EstimatedState actual_state;
-        IMC::EstimatedState previous_state;
-
-        int id_observation_function_kind;
-
-        double delta_corrected_state;
-        double w_x, w_y, w_z;
-        bool first_iteration;
-    };
-
     u_int64_t timestart;
     u_int64_t timestop;
-
     u_int64_t id_iteration;
+
+    #define MAX_SONAR_BEAM 2000
 
     struct Task: public DUNE::Tasks::Task
     {
         // IMC Messages to Consume
-        //! Euler Angles message.
-        IMC::EulerAngles m_euler_angle;
-
-        //! Angular velocity message.
-        IMC::AngularVelocity m_angular_velocity;
-
-        //! Depht message.
-        IMC::Depth m_depth;
-
         //! Distance message.
         IMC::Distance m_distance;
+
+        //! MultiBeam Sonar data
+        IMC::DataMBS m_data_mbs;
 
         //! Estimated State.
         IMC::EstimatedState m_estimated_state;
@@ -164,35 +102,25 @@ namespace Localization
         //! Task arguments.
         Arguments m_args;
 
-        // Global Variable
-        Dvl_Distance m_dvl;
-        PointListNED m_pts;
-        ParticleFilter m_pf;
-        Coord_Reference m_coord_ref;
+        // Particle filter
+        //! Filter Parameters definition
+        Filter_SIR_Properties m_filter_sir_properties;
 
-        // Pseudo-random Generator
-        Random::Generator *m_generator;
+        //! Filter Particle
+        Filter_SIR *m_filter_sir;
 
-        // Dvl temp tab
-        static const int MAX_PTS_BEAM = 1000;
-        double tab_dvl[4][MAX_PTS_BEAM];
-        int size_tab_dvl[4];
+        //! Current state and observation of the vehicle
+        ::Localization::ParticleFilter::Observation *current_observation;
+        ::Localization::ParticleFilter::State *current_state;
 
-        Matrix m_translation_map;
-        Matrix m_rotation_map;
+        // Sensor temp
+        Ray *m_ray;
 
-        Matrix m_pos_abs;
-        Matrix m_pos_cart;
+        // Filter kind
+        int m_filter_kind;
 
-        double euler_angles[3];
-        double pos_particle[3];
-        double pos_abs[3];
-
-        double alpha;
-        double beta;
-        double rho;
-
-        bool catching;
+        // First iteration after activation
+        bool first_iteration;
 
         //! Constructor.
         //! @param[in] name task name.
@@ -249,8 +177,8 @@ namespace Localization
              .units(Units::Meter);
 
             param(DTR_RT("Filter Kind"), m_args.filter_kind)
-             .values(DTR_RT("SingleBeam, MultiBeam"))
-             .defaultValue("SingleBeam")
+             .values(DTR_RT("Dvl_SingleBeam_GlobalMap, Dvl_QuadriBeam_GlobalMap, Mbs_Segmented_GlobalMap, Template_Function"))
+             .defaultValue("Dvl_SingleBeam_GlobalMap")
              .description(DTR("Kind of the filter"))
              .visibility(Tasks::Parameter::VISIBILITY_USER)
              .scope(Tasks::Parameter::SCOPE_MANEUVER);
@@ -271,248 +199,181 @@ namespace Localization
             clearMessages();
 
             // List of message consume by the localization filter task.
-            bind<IMC::EulerAngles>(this);
-            bind<IMC::Depth>(this);
             bind<IMC::Distance>(this);
+            bind<IMC::DataMBS>(this);
             bind<IMC::EstimatedState>(this);
+
+            // Allocation buffer for temporary sensor measures
+            m_ray = (Ray*)malloc(MAX_SONAR_BEAM*sizeof*m_ray);
+
+            // Default filter kind
+            m_filter_kind = 0;
+
+            // Dvl singlebeam with global map
+            if(strcmp(m_args.filter_kind.c_str(),"Dvl_SingleBeam_GlobalMap")==0)
+            {
+                m_filter_kind = 0;
+            }
+
+            // Dvl multibeam with global map
+            if(strcmp(m_args.filter_kind.c_str(),"Dvl_QuadriBeam_GlobalMap")==0)
+            {
+                m_filter_kind = 1;
+            }
+
+            // Mbs with global map, segmentation method
+            if(strcmp(m_args.filter_kind.c_str(),"Mbs_Segmented_GlobalMap")==0)
+            {
+                m_filter_kind = 2;
+            }
+
+            // Template_Function
+            if(strcmp(m_args.filter_kind.c_str(),"Template_Function")==0)
+            {
+                m_filter_kind = 3;
+            }
         }
 
         void
         clearMessages(void)
         {
-          m_depth.clear();
-          m_distance.clear();
-          m_estimated_state.clear();
-          m_euler_angle.clear();
-          m_corrected_state.clear();
+            m_distance.clear();
+            m_data_mbs.clear();
+            m_estimated_state.clear();
+            m_corrected_state.clear();
+            m_particle_state.clear();
         }
 
-        //! Get the map, and build the map datatree
-        void
-        GetListPointNed()
-        {
-            // Time performance evaluation
-            timestart = Time::Clock::getUsec();
-
-            // Getting the coordinate system references used by the current mission
-            m_coord_ref.latitude = m_estimated_state.lat;
-            m_coord_ref.longitude = m_estimated_state.lon;
-            m_coord_ref.height = m_estimated_state.height;
-
-            inf("LLH ref %f, %f, %f", m_coord_ref.latitude, m_coord_ref.longitude, m_coord_ref.height);
-
-            // Getting the initial position associated to coordinate references LLH
-            m_coord_ref.North = m_estimated_state.x;
-            m_coord_ref.East = m_estimated_state.y;
-            m_coord_ref.Down = m_estimated_state.z;
-
-            inf("NED ref %f, %f, %f", m_coord_ref.North, m_coord_ref.East, m_coord_ref.Down);
-
-            // Load the NED point list from the path obtained by an other trial on the same place
-            std::ifstream file(m_args.bathymetry_map_path.c_str(), std::ios::in);
-            if(file)
-            {
-                std::string line;
-
-                // Get the map reference
-                getline(file, line); // #LLH Offset: latitude, longitude, height
-                sscanf(line.c_str(), "#LLH Offset: %lf, %lf, %lf", &m_pts.map_ref.latitude, &m_pts.map_ref.longitude, &m_pts.map_ref.height);
-
-                inf("LLH map %f, %f, %f", m_pts.map_ref.latitude, m_pts.map_ref.longitude, m_pts.map_ref.height);
-                
-                getline(file, line); // #NED Offset: N, E, D
-                sscanf(line.c_str(), "#NED Offset: %lf, %lf, %lf", &m_pts.map_ref.North, &m_pts.map_ref.East, &m_pts.map_ref.Down);
-
-                inf("NED map %f, %f, %f", m_pts.map_ref.North, m_pts.map_ref.East, m_pts.map_ref.Down);
-
-                // Get the number of cells inside the map
-                getline(file, line); // #Num NED Cells: xxxxx
-                sscanf(line.c_str(), "#Num NED Cells: %d", &m_pts.num_pts);
-
-                inf("Number of Point: %d", m_pts.num_pts);
-
-                // Get NED point coordinate
-                double pos[2];
-                double data[1];
-
-                m_pts.data_tree = new KdTree(2);
-
-                double offset_north = 0;
-                double offset_east = 0;
-                double offset_down = 0;
-
-                // Determine Offsets NED between the map ref and the mission ref
-                DUNE::Coordinates::WGS84::displacement(
-                    // WGS84 coordinates map reference
-                    m_pts.map_ref.latitude, m_pts.map_ref.longitude, (m_pts.map_ref.height-m_pts.map_ref.Down),
-                    // WGS84 coordinates current reférence
-                    m_coord_ref.latitude, m_coord_ref.longitude, (m_coord_ref.height-m_coord_ref.Down),
-                    // Offset between two WGS84 coordinates
-                    &offset_north, &offset_east, &offset_down
-                );
-
-                inf("offset NED %f, %f, %f",offset_north, offset_east, offset_down);
-
-                // Add points inside the datatree
-                while(getline(file, line))
-                {
-                    sscanf(line.c_str(), "%lf, %lf, %lf,", &pos[0], &pos[1], &data[0]);
-
-                    pos[0] = pos[0] - offset_north;
-                    pos[1] = pos[1] - offset_east;
-                    data[0] = data[0] - offset_down;
-
-                    //error_offset is 0 for the first step, is determined by the calibration for the second call
-                    m_pts.data_tree->Insert(pos, data);
-                }
-
-                file.close();
-            }
-            else
-            {
-                inf("List point NED file don't find");
-            }
-
-            timestop = Time::Clock::getUsec() - timestart;
-            inf("Creation Kdtree from initial data (%d elements, in %f ms)", m_pts.num_pts, (float)timestop/1000);
-
-            // Initialize the range of the extraction method
-            m_pts.range = m_args.sensor_range;
-
-
-            /*
-                Controle le temps d'execution à prendre en charge en proportion lors de la phase d'activation
-            */
-
-
-
-        }
-
-        //! Spheric uniform noise
-        void
-        SphericUniformNoise(double sigma_x, double sigma_y, double sigma_z, double *x, double *y, double *z)
-        {
-            // Random spherical coordinates
-            double alea_rho = m_generator->uniform(0,1);
-            double alea_alpha = m_generator->uniform(0,2*c_pi);
-            double alea_beta = m_generator->uniform(0,c_pi);
-
-            // Random cartesian coordinates corresponding
-            *x = m_args.sigma_initial[0]*alea_rho*sin(alea_beta)*cos(alea_alpha)*sigma_x;
-            *y = m_args.sigma_initial[1]*alea_rho*sin(alea_beta)*sin(alea_alpha)*sigma_y;
-            *z = m_args.sigma_initial[2]*alea_rho*cos(alea_beta)*sigma_z;
-        }
 
         //! Initialization of the filter data
         void
         FilterInitialization()
         {
-            // Particle filter initialisation
-            m_pf.num_particle = m_args.particle_number;
-            m_pf.first_iteration = true;
+            // Global filter parameters
+            m_filter_sir_properties.num_particle = m_args.particle_number;
+            m_filter_sir_properties.sigma_initial = m_args.sigma_initial;
+            m_filter_sir_properties.sigma_propagation = m_args.sigma_propagation;
+            m_filter_sir_properties.sigma_observation = m_args.sigma_observation;
 
-            double x0 , y0, z0;
-            for(int i=0; i<m_pf.num_particle; i++)
-            {                    
+            // State parameters
+            m_filter_sir_properties.state_properties.type = 7; //6 freedom degree and time
 
-                //Spherical noise from the initial sigma
-                SphericUniformNoise(m_args.sigma_initial[0], m_args.sigma_initial[0], m_args.sigma_initial[0], &x0, &y0, &z0);
+            m_filter_sir_properties.state_properties.x_init = m_estimated_state.x;
+            m_filter_sir_properties.state_properties.y_init = m_estimated_state.y;
+            m_filter_sir_properties.state_properties.z_init = m_estimated_state.depth;
 
-                // Reference mission as initial state
-                x0 += m_estimated_state.x;
-                y0 += m_estimated_state.y;
-                z0 += m_estimated_state.depth;
+            m_filter_sir_properties.state_properties.phi_init = m_estimated_state.phi;
+            m_filter_sir_properties.state_properties.theta_init = m_estimated_state.theta;
+            m_filter_sir_properties.state_properties.psi_init = m_estimated_state.psi;
 
+            m_filter_sir_properties.state_properties.timestamp_init = m_estimated_state.getTimeStamp();
 
-                // Particle initialization
-                m_pf.particle[i] = new Particle(x0, y0, z0, m_estimated_state.phi, m_estimated_state.theta, m_estimated_state.psi);
-                m_pf.particle[i]->weight = (double)1/(double)m_pf.num_particle;
+            // Observation parameters by default
+            m_filter_sir_properties.observation_properties.type = 0;
+            m_filter_sir_properties.observation_properties.num_beam = 4;
+            m_filter_sir_properties.observation_properties.range_max = 20;
+            m_filter_sir_properties.observation_properties.num_segment = -1;
+            m_filter_sir_properties.observation_properties.angle_width = -1;
 
-                m_pf.particle_selected[i] = new Particle(x0, y0, z0, m_estimated_state.phi, m_estimated_state.theta, m_estimated_state.psi);
-                m_pf.particle_selected[i]->weight = (double)1/(double)m_pf.num_particle;
+            // Dvl singlebeam with global map
+            if(strcmp(m_args.filter_kind.c_str(),"Dvl_SingleBeam_GlobalMap")==0)
+            {
+                m_filter_kind = 0;
 
-                if(i==0)
-                {
-                    m_pf.sum_weight[i] = m_pf.particle[i]->weight;
-                }
-                else
-                {
-                    m_pf.sum_weight[i] = m_pf.sum_weight[i-1] + m_pf.particle[i]->weight;
-                }
+                m_filter_sir_properties.observation_properties.type = 0;
+                m_filter_sir_properties.observation_properties.num_beam = 4;
+                m_filter_sir_properties.observation_properties.range_max = 20;
 
-                /*
-                inf("particle %d : {%f, %f} sum_w: %f", i, m_pf.particle[i]->x, m_pf.particle[i]->y, m_pf.sum_weight[i]);
-                */
+                m_filter_sir_properties.observation_properties.num_segment = -1;
+                m_filter_sir_properties.observation_properties.angle_width = -1;
             }
 
-            m_pf.delta_corrected_state = 0;
+            // Dvl multibeam with global map
+            if(strcmp(m_args.filter_kind.c_str(),"Dvl_QuadriBeam_GlobalMap")==0)
+            {
+                m_filter_kind = 1;
 
-            // Initialization of initial state
-            m_pf.actual_state = m_estimated_state;
-            m_pf.previous_state = m_estimated_state;
+                m_filter_sir_properties.observation_properties.type = 1;
+                m_filter_sir_properties.observation_properties.num_beam = 4;
+                m_filter_sir_properties.observation_properties.range_max = 20;
 
-            // Choose of the observation function kind
-            m_pf.id_observation_function_kind  = 0;
-            if(m_args.filter_kind == "SingleBeam")  {m_pf.id_observation_function_kind = 0;}
-            if(m_args.filter_kind == "MultiBeam")   {m_pf.id_observation_function_kind = 1;}
+                m_filter_sir_properties.observation_properties.num_segment = -1;
+                m_filter_sir_properties.observation_properties.angle_width = -1;
+            }
 
-            // Initialization of corrected state
-            m_corrected_state.x = m_estimated_state.x;
-            m_corrected_state.y = m_estimated_state.y;
-            m_corrected_state.depth = m_estimated_state.depth;
-            m_corrected_state.phi = m_estimated_state.phi;
-            m_corrected_state.theta = m_estimated_state.theta;
-            m_corrected_state.psi = m_estimated_state.psi;
+            // Mbs with global map (ray tracing method)
+            if(strcmp(m_args.filter_kind.c_str(),"Mbs_Segmented_GlobalMap")==0)
+            {
+                m_filter_kind = 2;
 
-            std::memset(pos_abs,0,sizeof(pos_abs));
-        }
+                m_filter_sir_properties.observation_properties.type = 2;
+                m_filter_sir_properties.observation_properties.num_beam = 240;
+                m_filter_sir_properties.observation_properties.range_max = 30;
 
-        void
-        consume(const IMC::Depth* msg)
-        {
-           m_depth = *msg;
-           /*
-           inf("%f - Depth: %f m.", m_depth.getTimeStamp(), m_depth.value);
-           */
+                m_filter_sir_properties.observation_properties.num_segment = 10;
+                m_filter_sir_properties.observation_properties.angle_width = 120;
+            }
+
+            // Mbs with global map (segmentation method)
+            if(strcmp(m_args.filter_kind.c_str(),"Template_Function")==0)
+            {
+                m_filter_kind = 3;
+
+                m_filter_sir_properties.observation_properties.type = 3;
+                m_filter_sir_properties.observation_properties.num_beam = 240;
+                m_filter_sir_properties.observation_properties.range_max = 30;
+
+                m_filter_sir_properties.observation_properties.num_segment = 10;
+                m_filter_sir_properties.observation_properties.angle_width = 120;
+            }
+
+            // Map parameters
+            m_filter_sir_properties.map_properties.type = 0;
+
+            m_filter_sir_properties.map_properties.path_file = (char*)malloc(m_args.bathymetry_map_path.length()*sizeof(char));
+            sprintf(m_filter_sir_properties.map_properties.path_file,"%s",m_args.bathymetry_map_path.c_str());
+
+            m_filter_sir_properties.map_properties.extration_range = m_args.sensor_range;
+            m_filter_sir_properties.map_properties.time_offset_scanning = m_args.time_heightoffset;
+
+            m_filter_sir_properties.map_properties.mission_reference.latitude = m_estimated_state.lat;
+            m_filter_sir_properties.map_properties.mission_reference.longitude = m_estimated_state.lon;
+            m_filter_sir_properties.map_properties.mission_reference.height = m_estimated_state.height;
+
+            m_filter_sir_properties.map_properties.mission_reference.North = m_estimated_state.x;
+            m_filter_sir_properties.map_properties.mission_reference.East = m_estimated_state.y;
+            m_filter_sir_properties.map_properties.mission_reference.Down = m_estimated_state.z;
+
+            inf("path of map: %s", m_filter_sir_properties.map_properties.path_file);
+
+            // Creation of the filter object
+            m_filter_sir = new Filter_SIR(m_filter_sir_properties);
+
+            // Define the current state and current observation
+            current_state = new ::Localization::ParticleFilter::State(m_filter_sir_properties.state_properties);
+            current_observation = new ::Localization::ParticleFilter::Observation(m_filter_sir_properties.observation_properties);
         }
 
         void
         consume(const IMC::Distance* msg)
         {    
+            // If Dvl data is required
+            if(m_filter_kind==0 || m_filter_kind==1)
+            {
+                // Get the DVL distance for each beam by its identifier
+                if(msg->getSourceEntity() == 67)    {m_ray[0].range = msg->value;}
+                if(msg->getSourceEntity() == 68)    {m_ray[1].range = msg->value;}
+                if(msg->getSourceEntity() == 69)    {m_ray[2].range = msg->value;}
+                if(msg->getSourceEntity() == 70)    {m_ray[3].range = msg->value;}
 
-            // WARNING - Configuration logs without dvl filtering
-
-            // Get the DVL distance for each beam by its identifier
-            if(msg->getSourceEntity() == 67)    {m_dvl.distance[0] = msg->value;}
-            if(msg->getSourceEntity() == 68)    {m_dvl.distance[1] = msg->value;}
-            if(msg->getSourceEntity() == 69)    {m_dvl.distance[2] = msg->value;}
-            if(msg->getSourceEntity() == 70)    {m_dvl.distance[3] = msg->value;}
-            if(msg->getSourceEntity() == 71)    {m_dvl.distance[4] = msg->value;}
-
-            // Warning - Configuration logs with dvl filtering
-            /*
-            // Get the DVL distance for each beam by its identifier
-            if(msg->getSourceEntity() == 65)    {m_dvl.distance[0] = msg->value;}
-            if(msg->getSourceEntity() == 66)    {m_dvl.distance[1] = msg->value;}
-            if(msg->getSourceEntity() == 67)    {m_dvl.distance[2] = msg->value;}
-            if(msg->getSourceEntity() == 68)    {m_dvl.distance[3] = msg->value;}
-            if(msg->getSourceEntity() == 69)    {m_dvl.distance[4] = msg->value;}
-            */
-            /*
-            inf("DVL: B0 %f m - B1 %f m - B2 %f m - B3 %f m - Bmin %f m",
-                m_dvl.distance[0], m_dvl.distance[1], m_dvl.distance[2], m_dvl.distance[3], m_dvl.distance[4]);
-            */
-
-        }
-
-        void
-        consume(const IMC::EulerAngles* msg)
-        {
-            m_euler_angle = *msg;
-
-            /*
-            inf("%f - Euler Angles: phi %f rad - theta %f rad - psi %f rad.", m_euler_angle.getTimeStamp(), m_euler_angle.phi, m_euler_angle.theta ,m_euler_angle.psi);
-            */
+                /*
+                inf("DVL: B0 %f m - B1 %f m - B2 %f m - B3 %f m",
+                    m_ray[0].range,
+                    m_ray[1].range,
+                    m_ray[2].range,
+                    m_ray[3].range);
+                */
+            }
         }
 
         void
@@ -521,7 +382,49 @@ namespace Localization
             m_estimated_state = *msg;
 
             /*
-            inf("%f - Estimated State: N %f m - E %f m - D %f m.", m_estimated_state.getTimeStamp(), m_estimated_state.x, m_estimated_state.y, m_estimated_state.z);
+            inf("%f - Estimated State: N %f m - E %f m - D %f m.",
+                m_estimated_state.getTimeStamp(),
+                m_estimated_state.x,
+                m_estimated_state.y,
+                m_estimated_state.z);
+            */
+        }
+
+        void
+        consume(const IMC::DataMBS* msg)
+        {
+            m_data_mbs = *msg;
+
+            // If Multibeam data is required
+            if(m_filter_kind==2 || m_filter_kind==3)
+            {
+                // Roll angle reference less the first increment
+                m_ray[0].angle = m_data_mbs.startangle;
+
+                m_ray[0].angle = fmod(m_ray[0].angle,360);
+                if(m_ray[0].angle>=180) {m_ray[0].angle-=360;}
+
+                int n = 0;
+                for(int h=0; h<m_data_mbs.numbeam*2;h=h+2)
+                {
+                    int l=(h+1);
+                    m_ray[n].range = ((uint8_t)(m_data_mbs.data[h])<<8|(uint8_t)(m_data_mbs.data[l]))*m_data_mbs.rangeresolution;
+                    m_ray[n].range = m_ray[n].range*m_data_mbs.soundvelocity/1500;
+
+                    if(n>0)
+                    {
+                        m_ray[n].angle = m_ray[n-1].angle + m_data_mbs.angleincrement;
+                    }
+                    n++;
+                }
+            }
+
+            /*
+            inf("%f - Data MBS: %d beams, range %dm, angle %d°",
+                m_data_mbs.getTimeStamp(),
+                m_data_mbs.numbeam,
+                m_data_mbs.range,
+                m_data_mbs.sectorsize);
             */
         }
 
@@ -569,7 +472,7 @@ namespace Localization
         {
             inf("Activation request");
             m_activating = true;
-            m_countdown.setTop(10);//getActivationTime()
+            m_countdown.setTop(10);
         }
 
         void
@@ -586,20 +489,38 @@ namespace Localization
             inf("Particle Filter Parameters");
             inf("Particles Numbers: %d", m_args.particle_number);
             inf("Iteration Time: %f", m_args.iteration_time);
-            inf("Initial Sigma Vector: %f %f %f", m_args.sigma_initial[0], m_args.sigma_initial[1], m_args.sigma_initial[2]);
-            inf("Propagation Sigma Vector: %f %f %f", m_args.sigma_propagation[0], m_args.sigma_propagation[1], m_args.sigma_propagation[2]);
-            inf("Observation Sigma Vector: %f %f %f", m_args.sigma_observation[0], m_args.sigma_observation[1], m_args.sigma_observation[2]);
+
+            inf("Initial Sigma Vector: %f %f %f",
+                m_args.sigma_initial[0],
+                m_args.sigma_initial[1],
+                m_args.sigma_initial[2]);
+
+            inf("Propagation Sigma Vector: %f %f %f",
+                m_args.sigma_propagation[0],
+                m_args.sigma_propagation[1],
+                m_args.sigma_propagation[2]);
+
+            inf("Observation Sigma Vector: %f %f %f",
+                m_args.sigma_observation[0],
+                m_args.sigma_observation[1],
+                m_args.sigma_observation[2]);
+
             inf("Filter Kind: %s", m_args.filter_kind.c_str());
+
             inf("Map Parameters:");
             inf("Bathymetry Map Path: %s", m_args.bathymetry_map_path.c_str());
             inf("Time Scan Height Offset: %f", m_args.time_heightoffset);
             inf("Extraction Range: %f", m_args.sensor_range);
 
-            // Memory allocation
-            Allocation();
-
             //Initialization of iteration number
             id_iteration = 0;
+            first_iteration = true;
+
+            //Initialization of temp buffer
+            for(int i=0;i<MAX_SONAR_BEAM;i++)
+            {
+                m_ray[i].range = -1;
+            }
 
             inf("Initialisation phase finished");
 
@@ -616,7 +537,7 @@ namespace Localization
             inf("Cleaning data phase done");
 
             m_deactivating = true;
-            m_countdown.setTop(10);//getDeactivationTime()
+            m_countdown.setTop(10);
         }
 
         void
@@ -656,568 +577,18 @@ namespace Localization
                 deactivate();
             }
         }
-        
-        //! Localization filter computation.
-        bool
-        filterComputation()
-        {
-
-            //! Start of filter processing
-
-            // Measure of time efficiency
-            // (Used for the timestep too)
-            timestart = Time::Clock::getUsec();
-
-            //! Initialisation for each filter iteration
-
-            /*
-            //Test quality and speed to get IMC data
-            inf("%f - last consume Estimated State", m_estimated_state.getTimeStamp());
-            inf("%f - last consume Depth", m_depth.getTimeStamp());
-            inf("%f - last consume Euler Angles", m_euler_angle.getTimeStamp());
-            inf("%f - last consume Angular Velocity" ,m_angular_velocity.getTimeStamp());
-            inf("%f - last consume Distance" ,m_dvl.previous_time);
-            */
-
-            // Corrected state initialization
-            double x_corrected = 0;
-            double y_corrected = 0;
-            double z_corrected = 0;
-
-            //! Step of propagation
-
-            if(m_pf.first_iteration==false)
-            {
-
-                // Matrice transformation state processing
-                m_pf.actual_state = m_estimated_state;
-
-                // State Translation Vector
-                double delta_x = m_pf.actual_state.x - m_pf.previous_state.x;
-                double delta_y = m_pf.actual_state.y - m_pf.previous_state.y;
-                double delta_z = m_pf.actual_state.depth - m_pf.previous_state.depth;
-
-                // Delta Euler Angles Vector
-                double delta_phi = m_pf.actual_state.phi - m_pf.previous_state.phi;
-                double delta_theta = m_pf.actual_state.theta - m_pf.previous_state.theta;
-                double delta_psi = m_pf.actual_state.psi - m_pf.previous_state.psi;
-
-                // For each particle
-                for(int n=0;n<m_pf.num_particle;n++)
-                {
-
-                    // Spherical noise from the Propagation sigma
-                    SphericUniformNoise(m_args.sigma_propagation[0], m_args.sigma_propagation[0], m_args.sigma_propagation[0], &m_pf.w_x, &m_pf.w_y, &m_pf.w_z);
-
-                    // Propagation of particles
-                    m_pf.particle[n]->x = m_pf.particle_selected[n]->x + delta_x + m_pf.w_x;
-                    m_pf.particle[n]->y = m_pf.particle_selected[n]->y + delta_y + m_pf.w_y;
-                    m_pf.particle[n]->z = m_pf.particle_selected[n]->z + delta_z + m_pf.w_z;
-
-                    m_pf.particle[n]->phi = m_pf.particle_selected[n]->phi + delta_phi;
-                    m_pf.particle[n]->theta = m_pf.particle_selected[n]->theta + delta_theta;
-                    m_pf.particle[n]->psi = m_pf.particle_selected[n]->psi + delta_psi;
-
-                    // Translation matrix of the map to particle position
-                    pos_particle[0] = m_pf.particle[n]->x;
-                    pos_particle[1] = m_pf.particle[n]->y;
-                    pos_particle[2] = m_pf.particle[n]->z;
-
-                    m_translation_map = Matrix(pos_particle, 3, 1);
-
-                    // Rotation Matrix of the map to particle orientation
-                    euler_angles[0] = m_euler_angle.phi;
-                    euler_angles[1] = m_euler_angle.theta;
-                    euler_angles[2] = m_euler_angle.psi;
-
-                    m_rotation_map = Matrix(euler_angles, 3, 1).toDCM();
-
-                    /*
-                    //Displaying Map transformation for each particles
-                    inf("Translation Matrix:\n{%f\n %f\n %f}",
-                        m_translation_map.element(0,0),
-                        m_translation_map.element(1,0),
-                        m_translation_map.element(2,0)
-                        );
-
-                    inf("Rotation Matrix:\n{%f, %f, %f\n %f, %f, %f\n %f, %f, %f}",
-                        m_rotation_map(0,0), m_rotation_map(0,1), m_rotation_map(0,2),
-                        m_rotation_map(1,0), m_rotation_map(1,1), m_rotation_map(1,2),
-                        m_rotation_map(2,0), m_rotation_map(2,1), m_rotation_map(2,2)
-                        );
-                    */
-
-                    //! Step of ponderation
-
-                    // Choose of the filter observation function
-                    switch (m_pf.id_observation_function_kind) {
-                    case 0:
-                        // Ponderation using the observation function for monobeam analysis
-                        // (ground measure, similar to the alterometric compensation methods in aeronautics)
-                        SinglebeamPonderation(m_pf.particle[n]);
-                        break;
-
-                    case 1:
-                        // Ponderation using the observation function for multibeam analysis
-                        // (range extraction around position and ray tracing extraction)
-                        MultibeamPonderation(m_pf.particle[n]);
-                        break;
-
-
-                    default:
-                        break;
-                    }
-
-                    /*
-                    // Display result of ponderation step
-                    inf("Particle %d: pos {%f, %f}, (range %d m, %d elements)", n, m_pf.particle[n]->x, m_pf.particle[n]->y, (int)m_pts.range, m_pts.num_pts_set);
-
-                    inf("Particle Observation: DVL0 = %f, DVL1 = %f, DVL2 = %f, DVL3 = %f",
-                             m_pf.particle[n]->obs.dvl[0],
-                             m_pf.particle[n]->obs.dvl[1],
-                             m_pf.particle[n]->obs.dvl[2],
-                             m_pf.particle[n]->obs.dvl[3]
-                           );
-
-                    inf("Current Observation:  DVL0 = %f, DVL1 = %f, DVL2 = %f, DVL3 = %f",
-                             m_dvl.distance[0],
-                             m_dvl.distance[1],
-                             m_dvl.distance[2],
-                             m_dvl.distance[3]
-                           );
-
-                    inf("Likelihood value: %f", m_pf.particle[n]->weight);
-                    */
-
-                    //Ponderate Average of corrected state
-                    x_corrected += m_pf.particle[n]->weight*m_pf.particle[n]->x;
-                    y_corrected += m_pf.particle[n]->weight*m_pf.particle[n]->y;
-                    z_corrected += m_pf.particle[n]->weight*m_pf.particle[n]->z;
-
-                    // Cumulated Sum of weight value
-                    if(n==0)
-                    {
-                        m_pf.sum_weight[n] = m_pf.particle[n]->weight;
-                    }
-                    else
-                    {
-                        m_pf.sum_weight[n] = m_pf.sum_weight[n-1] + m_pf.particle[n]->weight;
-                    }
-                }
-            }
-
- //! STEP OF SELECTION
-
-            /*
-            FitnessProportionnalSelection();
-            */
-
-            StochasticUniversalSampling();
-
-            /*
-            //Display results of selection
-            for(int i=0; i<m_pf.num_particle;i++)
-            {
-                inf("Ponderated P:{%.2f, %.2f} W:{%.2f}, Selected P:{%.2f, %.2f} W:{%.2f}",
-                        m_pf.particle[i]->x,
-                        m_pf.particle[i]->y,
-                        m_pf.particle[i]->weight,
-                        m_pf.particle_selected[i]->x,
-                        m_pf.particle_selected[i]->y,
-                        m_pf.particle_selected[i]->weight
-                   );
-            }
-            */
-
-
-//! END OF FILTER PROCESSING
-
-            // Ponderated Barycenter of particles
-            if(m_pf.sum_weight[m_pf.num_particle-1] > 0)
-            {
-                x_corrected /= m_pf.sum_weight[m_pf.num_particle-1];
-                y_corrected /= m_pf.sum_weight[m_pf.num_particle-1];
-                z_corrected /= m_pf.sum_weight[m_pf.num_particle-1];
-            }
-            else
-            {
-                // If there isn't Observation data we preserved the preview corrected state
-                x_corrected = m_corrected_state.x;
-                y_corrected = m_corrected_state.y;
-                z_corrected = m_corrected_state.z;
-                // The filter has not converged and the state is loose
-            }
-
-            /*
-            // For test the state function
-            x_corrected = m_corrected_state.x + m_pf.state_vector[0];
-            y_corrected = m_corrected_state.y + m_pf.state_vector[1];
-            */
-
-            // Corrected State {x, y, z, phi, theta, psi}
-            m_corrected_state.phi = m_estimated_state.phi;
-            m_corrected_state.theta = m_estimated_state.theta;
-            m_corrected_state.psi = m_estimated_state.psi;
-
-            if(m_pf.first_iteration==false)
-            {
-                m_corrected_state.x = x_corrected;
-                m_corrected_state.y = y_corrected;
-                m_corrected_state.depth = z_corrected;
-            }
-            else
-            {
-                m_pf.first_iteration = false;
-            }
-
-
-            // Display result of correction
-            inf("Estimated position: %f, %f, %f", m_estimated_state.x, m_estimated_state.y, m_estimated_state.depth);
-            inf("Corrected position: %f, %f, %f", m_corrected_state.x, m_corrected_state.y, m_corrected_state.depth);
-
-
-            // Particles Exportation
-            ParticlesExportation();
-
-            // Memoristation of state
-            m_pf.previous_state = m_pf.actual_state;
-
-            // Final Time of processing (must be below of 1 seconde)
-            timestop = Time::Clock::getUsec() - timestart;
-            inf("Real time data proccessing: %f ms", (float)timestop/1000);
-
-            double time_wait = m_args.iteration_time - (double)(timestop)/1000000;
-            DUNE::Time::Delay::wait(time_wait);
-            inf("wait time data proccessing: %f ms", (float)time_wait*1000);
-
-            u_int64_t restricted_iteration_time = Time::Clock::getUsec() - timestart;
-            inf("Restricted time data proccessing: %f ms", (float)restricted_iteration_time/1000);
-
-            // Last timestep between two corrections (delta t in second)
-            m_pf.delta_corrected_state = (double)(restricted_iteration_time)/1000000;
-
-            return true;
-        }
-
-        //! IMC Data Particles processing for exportation
-        void
-        ParticlesExportation()
-        {
-            m_particle_state.num = m_pf.num_particle;
-
-            if(!m_particle_state.data.empty())
-            {
-                m_particle_state.data.clear();
-            }
-
-            std::ostringstream ss;
-            for(int n=0; n<m_pf.num_particle; n++)
-            {
-                // Stock particles values inside a stream
-                ss << m_pf.particle[n]->x << " " << m_pf.particle[n]->y << " " << m_pf.particle[n]->z << " " <<m_pf.particle[n]->weight << " ";
-            }
-
-            // Conversion from ostringstreal toward the rawformat data (vector<char>)
-            std::string str = ss.str();
-            const char* str_c = str.c_str();
-            m_particle_state.data.insert(m_particle_state.data.end(), str_c, str_c + str.size());
-        }
-
-        //! Fitness Proportionnal Selection
-        void
-        FitnessProportionnalSelection()
-        {
-            double rand_value;
-    
-            // Random selection
-            //
-            // p(particle(i) is selected) = w(i)/sum(w(0->N-1))
-            //
-            for(int n=0; n<m_pf.num_particle; n++)
-            {
-                // Random value on [0; Sum_weight[
-                rand_value = m_generator->uniform(0, m_pf.sum_weight[(m_pf.num_particle-1)]);
-    
-                int s = 0;
-                while(rand_value>m_pf.sum_weight[s] && s<m_pf.num_particle)
-                {
-                    s++;
-                }
-
-                //inf("p %d vers %d",j,n);
-                //inf("rand = %f ; weight = %f ; sum: %f", rand_value, m_pf.sum_weight[j], m_pf.sum_weight[(m_pf.num_particle-1)]);
-    
-                // Copy of the particle selected
-                m_pf.particle_selected[n]->x = m_pf.particle[s]->x;
-                m_pf.particle_selected[n]->y = m_pf.particle[s]->y;
-                m_pf.particle_selected[n]->z = m_pf.particle[s]->z;
-
-                m_pf.particle_selected[n]->phi = m_pf.particle[s]->phi;
-                m_pf.particle_selected[n]->theta = m_pf.particle[s]->theta;
-                m_pf.particle_selected[n]->psi = m_pf.particle[s]->psi;
-
-                m_pf.particle_selected[n]->weight = m_pf.particle[s]->weight;
-            }
-        }
-        
-        //! Stochastic Universal Sampling
-        void
-        StochasticUniversalSampling()
-        {
-            // First random value on [0;sum_W/N]
-            double rand_value = m_generator->uniform(0, m_pf.sum_weight[m_pf.num_particle-1]/(double)m_pf.num_particle);
-            int s = 0;
-
-            for(int n=0; n<m_pf.num_particle;n++)
-            {
-                while(rand_value>m_pf.sum_weight[s] && s<m_pf.num_particle)
-                {
-                    s++;
-                }
-
-                // Copy of the particle selected
-                m_pf.particle_selected[n]->x = m_pf.particle[s]->x;
-                m_pf.particle_selected[n]->y = m_pf.particle[s]->y;
-                m_pf.particle_selected[n]->z = m_pf.particle[s]->z;
-
-                m_pf.particle_selected[n]->phi = m_pf.particle[s]->phi;
-                m_pf.particle_selected[n]->theta = m_pf.particle[s]->theta;
-                m_pf.particle_selected[n]->psi = m_pf.particle[s]->psi;
-
-                m_pf.particle_selected[n]->weight = m_pf.particle[s]->weight;
-
-                // Next value of rand
-                rand_value = rand_value + m_pf.sum_weight[m_pf.num_particle-1]/(double)m_pf.num_particle;
-
-                //inf("p %d vers %d",s,n);
-                //inf("rand = %f ; weight = %f", rand_value, m_pf.sum_weight[s]);
-            }
-        }
-
-        //! Ponderation using the monobeam observation function
-        void
-        SinglebeamPonderation(Particle *particle)
-        {
-            //Observation function for monobeam analysis
-            double *pts = m_pts.data_tree->GetClosestNode(pos_particle);
-
-            if(pts)
-            {
-                //inf("Debug analysis state: %f", m_pts.data_tree->hresult);
-
-                // Get the corrected position of the ground (ablolute frame)
-                pos_abs[0]=pts[0];
-                pos_abs[1]=pts[1];
-                pos_abs[2]=pts[2]+m_pts.map_ref.offset_down_corrected;
-
-                /*
-                pos_abs[0]=m_pts.dataset[0][0];
-                pos_abs[1]=m_pts.dataset[0][1];
-                pos_abs[2]=m_pts.dataset[0][2];
-                */
-
-                //inf("pos particle %d: %f %f %f", n, pos_particle[0], pos_particle[1], pos_particle[2]);
-                //inf("pos map equivalent: %f %f %f", pos_abs[0], pos_abs[1], pos_abs[2]);
-
-                // Get the position in the local frame
-                m_pos_abs = Matrix(pos_abs, 3, 1);
-                m_pos_cart = m_rotation_map * (m_pos_abs - m_translation_map);
-
-                //Get the distance between the map measure and the particle
-                //rho = sqrt(((m_pos_cart(0,0)*m_pos_cart(0,0))+(m_pos_cart(1,0)*m_pos_cart(1,0))+(m_pos_cart(2,0)*m_pos_cart(2,0))));
-
-                // Get just the vertical component
-                double obs_map = m_pos_cart(2,0);
-
-                //Research the buttom distance
-                double obs_dvl = 1000;
-                for(int i=0;i<4;i++)
-                {
-                    if(m_dvl.distance[i]<obs_dvl && m_dvl.distance[i]>0)
-                    {
-                        obs_dvl = m_dvl.distance[i];
-                    }
-                }
-
-                double ksi = (obs_dvl-obs_map)*(obs_dvl-obs_map);
-                particle->weight =  exp((-ksi/(2.0*m_args.sigma_observation[0]*m_args.sigma_observation[0])));
-
-
-                //inf("dvl %f - map dist %f - weight %f - wpf %f", obs_dvl, obs_map, ksi, particle->weight);
-
-            }
-            else
-            {
-                inf("Extraction data fail");
-                particle->weight = 0.0000000001;
-            }
-        }
-
-        //! Ponderation using the multibeam observation function
-        void
-        MultibeamPonderation(Particle *particle)
-        {
-            // Extraction of significant points for each particle (get all point around the particle position with a defined range)
-            m_pts.dataset =  m_pts.data_tree->GetKNearestNeightbors(pos_particle, m_pts.range);
-            m_pts.num_pts_set = m_pts.data_tree->GetKnnSize();
-
-            // Initialization of particle observation
-            particle->obs.dvl[0] = 0;
-            particle->obs.dvl[1] = 0;
-            particle->obs.dvl[2] = 0;
-            particle->obs.dvl[3] = 0;
-
-            for(int i=0; i<4;i++)
-            {
-                size_tab_dvl[i]=0;
-            }
-
-            // For each point inside the perception field
-            for(int i=0;i<m_pts.num_pts_set;i++)
-            {
-                // Point list expressed in the particle reference frame
-                pos_abs[0] = m_pts.dataset[i][0];
-                pos_abs[1] = m_pts.dataset[i][1];
-                pos_abs[2] = m_pts.dataset[i][2];
-                m_pos_abs = Matrix(pos_abs, 3, 1);
-                m_pos_cart = m_rotation_map * (m_pos_abs - m_translation_map);
-
-                // Spherical coordinates conversion
-                rho = sqrt(((m_pos_cart(0,0)*m_pos_cart(0,0))+(m_pos_cart(1,0)*m_pos_cart(1,0))+(m_pos_cart(2,0)*m_pos_cart(2,0))));
-                alpha = Math::Angles::degrees(atan2(m_pos_cart(1,0),m_pos_cart(0,0)));
-                beta = Math::Angles::degrees(atan2(sqrt((m_pos_cart(0,0)*m_pos_cart(0,0))+(m_pos_cart(1,0)*m_pos_cart(1,0))), m_pos_cart(2,0)));
-
-                // Angle normalisation
-                alpha = fmod(alpha, 360);
-                if(alpha<0) {alpha +=360;}
-                beta = fmod(beta, 360);
-                if(beta<0) {beta +=360;}
-
-                // Data inside the field of DVL sensor
-                if(beta>0 && beta<60)
-                {
-
-                    //inf("absolute pos: %f %f %f", m_pos_abs(0,0), m_pos_abs(1,0), m_pos_abs(2,0));
-                    //inf("cartesian pos: %f %f %f", m_pos_cart(0,0), m_pos_cart(1,0), m_pos_cart(2,0));
-                    //inf("sperical pos: %f %f %f", rho, alpha, beta);
-
-                    if(alpha>330 || alpha<30)
-                    {
-                        //DVL 1 : get and stock new map point until max
-                        if(size_tab_dvl[1] < MAX_PTS_BEAM)
-                        {
-                            tab_dvl[1][size_tab_dvl[1]] = rho;
-                            size_tab_dvl[1]++;
-                        }
-                    }
-
-                    if(alpha>60 && alpha<120)
-                    {
-                        //DVL 0 : get and stock new map point until max
-                        if(size_tab_dvl[0] < MAX_PTS_BEAM)
-                        {
-                            tab_dvl[0][size_tab_dvl[0]] = rho;
-                            size_tab_dvl[0]++;
-                        }
-                    }
-
-                    if(alpha>150 && alpha<210)
-                    {
-                        //DVL 2 : get and stock new map point until max
-                        if(size_tab_dvl[2] < MAX_PTS_BEAM)
-                        {
-                            tab_dvl[2][size_tab_dvl[2]] = rho;
-                            size_tab_dvl[2]++;
-                        }
-                    }
-
-                    if(alpha>240 && alpha<300)
-                    {
-                        //DVL 3 : get and stock new map point until max
-                        if(size_tab_dvl[3] < MAX_PTS_BEAM)
-                        {
-                            tab_dvl[3][size_tab_dvl[3]] = rho;
-                            size_tab_dvl[3]++;
-                        }
-                    }
-                }
-            }
-
-            // Calcul of likelihood weight (gaussian function)
-            double weight = 0;
-            double num_significant_dvl = 0;
-
-            // Extraction of the most significant value for each dvl
-            for(int i=0;i<4;i++)
-            {
-                particle->obs.dvl[i] = 100;
-
-                if(size_tab_dvl[i]>0)
-                {
-                    // Selection the minimale distance seen inside the field of each DVL beam
-                    for(int obs=0;obs<size_tab_dvl[i];obs++)
-                    {
-                        if(particle->obs.dvl[i] > tab_dvl[i][obs])
-                        {
-                            particle->obs.dvl[i] = tab_dvl[i][obs];
-                        }
-                    }
-
-                    // Weight for the current particle
-                    weight += ((particle->obs.dvl[i]-m_dvl.distance[i])*(particle->obs.dvl[i]-m_dvl.distance[i]));
-                    num_significant_dvl++;
-                }
-            }
-
-            // If the state in inside the map all observation is completed
-            if(num_significant_dvl < 4)
-            {
-                particle->weight = 0.000001;
-            }
-            else
-            {   //  1/(m_args.sigma_observation*sqrt(2*c_pi)) w proportional to ->
-                particle->weight =  exp((-weight/(2.0*m_args.sigma_observation[0]*m_args.sigma_observation[0])));
-            }
-        }
-
-        //! Memory allocation
-        void
-        Allocation()
-        {
-            // Creation a new pseudo-random generator type drand48
-            m_generator = Random::Factory::create(Random::Factory::c_drand48);
-
-            // Initialisation of dvl structure
-            for(int i=0;i<m_dvl.MAX_DVL_VALUE;i++)
-            {
-                m_dvl.distance[i] = -1;
-            }
-
-            // Initialisation of dvl temp tab
-            for(int j=0; j<4; j++)
-            {
-                for(int i=0; i<MAX_PTS_BEAM; i++)
-                {
-                    tab_dvl[j][i] = 0;
-                }
-                size_tab_dvl[j] = 0;
-            }
-
-        }
 
         //! Check if all start condition is ok
         bool
         Checking()
         {
             // IMC message getting checking
-            if(m_euler_angle.getTimeStamp() == -1)      {return false;}
-            if(m_depth.getTimeStamp() == -1)            {return false;}
             if(m_estimated_state.getTimeStamp() == -1)  {return false;}
 
-            // Initial dvl distances checking
-            for(int i = 0; i<m_dvl.MAX_DVL_VALUE;i++)
+            // Check the required sensor perception
+            for(int i = 0; i<m_filter_sir_properties.observation_properties.num_beam;i++)
             {
-                if(m_dvl.distance[i] == -1)   {return false;}
+                if(m_ray[i].range == -1)   {return false;}
             }
 
             // All is ok
@@ -1228,53 +599,38 @@ namespace Localization
         void
         Initialization()
         {
-            // Initial Condition used by the filter
+            // Initialization of the filter properties and create the PF filter
             FilterInitialization();
 
-            // Get the map (list of Ned Coordinate set in KdTree)
-            GetListPointNed();
-
             // Get the initial height offset error
-            checkGroundOffset();
+            CheckGroundOffset();
 
-            // 1 Le checking doit prendre en compte les effets de surface et préciser par retour que l'initialisation n'est pas
-            //   complète, il faut alors stopper la tache, vider les buffers courants et recommencer.
-            //
-            // 2 Le chargement de la carte peut être simplifier et sheduler, un chargement par paquet peut etre envisagé pour se
-            //   laisser la capacité de gérer des carte beauuuuucoup plus grande.
-            //
-            // 3 Controler la manière dont les tâches sont supervisées -> activation phases, timeout, cpu control... trouver une
-            //   structure d'initialisation adéquate.
-
+            // Set the offset for Neptus
+            m_corrected_state.alt= m_filter_sir->map->pts_list.map_ref.offset_down_corrected;
         }
 
         //! Clean and free memory
         void
         Clean()
         {
-            //Free memory of kdtree
-            m_pts.data_tree->Free();
         }
 
         //! Checking robot state
         bool
         checkingState()
         {
+
+            // All is ok
             return true;
         }
         
-        //
-        //     WARNING THIS METHOD IS NOT FINISHED -> DON'T TOUCH, DON'T USE!
-        //
-
         //! Check the ground offset
         void 
-        checkGroundOffset()
+        CheckGroundOffset()
         {
             // The incertitude between map and logs is often high due to the GPS fix precision,
             // this method track the difference and correct the offset, by successive correction.
-
-            // on 10 seconds (->param)
+            // on 5 seconds (->param)
 
             double num_iteration = 0;
             double ground_offset_mission = 0;
@@ -1289,76 +645,68 @@ namespace Localization
             while(checking_time < m_args.time_heightoffset && !stopping())
             {
 
-                //
+                // comsume message (required if the checking is too long)
                 consumeMessages();
 
                 // Mission ground observation
+                double ray_min = m_filter_sir_properties.observation_properties.range_max;
 
-                double dvl_min = m_dvl.distance[0];
-                for(int i=1;i<3;i++)
+                for(int i=0;i<m_filter_sir_properties.observation_properties.num_beam;i++)
                 {
-                    if((dvl_min>m_dvl.distance[i]))
+                    if(m_ray[i].range>0)
                     {
-                        dvl_min=m_dvl.distance[i];
+                        if(ray_min > m_ray[i].range)
+                        {
+                            ray_min = m_ray[i].range;
+                        }
                     }
                 }
 
-                ground_offset_mission = dvl_min;
-    
-                // Map ground observation
-                
-                // Extraction of significant points for the actual position
-                actual_position[0] = (double)(m_estimated_state.x);
-                actual_position[1] = (double)(m_estimated_state.y);
-                actual_position[2] = (double)(m_estimated_state.depth);
-
-                //m_pts.data_tree->NearestRange(actual_position, 0, 3);
-                double *pts = m_pts.data_tree->GetClosestNode(actual_position);
-
-
-                /*
-                //test
-                m_pts.dataset = m_pts.data_tree->GetKNearestNeightbors(actual_position, m_args.sensor_range);
-                m_pts.num_pts_set = m_pts.data_tree->GetKnnSize();
-
-                inf("Knn method -> K = %d", m_pts.num_pts_set);
-
-
-                // For each point inside the perception field
-                for(int i=0;i<m_pts.num_pts_set;i++)
+                if(ray_min < m_filter_sir_properties.observation_properties.range_max)
                 {
-                    double dist = sqrt( (m_pts.dataset[i][0]-actual_position[0])*(m_pts.dataset[i][0]-actual_position[0])
-                           + (m_pts.dataset[i][1]-actual_position[1])*(m_pts.dataset[i][1]-actual_position[1])
+                    ground_offset_mission = ray_min;
 
-                            );
+                    // Map ground observation
 
-                    inf("node %d - distance %f m", i, dist);
+                    // Extraction of significant points for the actual position
+                    actual_position[0] = (double)(m_estimated_state.x);
+                    actual_position[1] = (double)(m_estimated_state.y);
+                    actual_position[2] = (double)(m_estimated_state.depth);
 
+                    //m_pts.data_tree->NearestRange(actual_position, 0, 3);
+                    double *pts = m_filter_sir->map->pts_list.data_tree->GetClosestNode(actual_position);
+
+                    // For each point viewed under the LAUV
+                    ground_offset_map = pts[2]-m_estimated_state.depth;
+                    error_offset += (ground_offset_mission - ground_offset_map);
+                    num_iteration++;
+
+                    inf("offsets mission %f vs map %f",
+                        ground_offset_mission,
+                        ground_offset_map);
                 }
-                */
-
-
-                // For each point viewed under the LAUV
-                ground_offset_map = pts[2];
-                error_offset += (ground_offset_mission - ground_offset_map);
-                num_iteration++;
-
-                //inf("offsets mission %f vs map %f", ground_offset_mission, ground_offset_map);
 
                 //Space the disance acquisition
-                Time::Delay::waitMsec(50);
+                Time::Delay::waitMsec(200);
 
                 //Get the ellapsed time in second
                 checking_time = (double)(Time::Clock::getUsec() - timestart)/1000000;
+
             }
 
             error_offset /= num_iteration;
 
-            m_pts.map_ref.offset_down_corrected = error_offset;
+            m_filter_sir->map->pts_list.map_ref.offset_down_corrected = error_offset;
 
             inf("error offset between map and log: %f", error_offset);
-            //inf("last offsets %f vs %f", ground_offset_mission, ground_offset_map);
-            //inf("num iteration: %f", num_iteration);
+
+/*
+            inf("last offsets %f vs %f",
+                ground_offset_mission,
+                ground_offset_map);
+
+            inf("num iteration: %f", num_iteration);
+*/
         }
 
         //! Main loop.
@@ -1374,7 +722,7 @@ namespace Localization
                     try
                     {
                         //Check the initial condition required to launch the filter task
-                        if(m_pf.first_iteration==true)
+                        if(first_iteration==true)
                         {
                             // Checking if all initial condition is respected
                             while(!Checking() && !stopping())
@@ -1382,9 +730,15 @@ namespace Localization
                                 waitForMessages(1.0);
                             }
 
-                            // Variable and Filter Initialzation
+                            // Variable and Filter Initialization
                             Initialization();
+
+                            // End of filter allocation
+                            first_iteration = false;
                         }
+
+                        // Time for iteration timestep
+                        timestart = Time::Clock::getUsec();
 
                         //! Iteration phase
                         inf("Iteration %ld", id_iteration);
@@ -1392,14 +746,144 @@ namespace Localization
                         // Checking condition state to enable the localization
                         if(checkingState())
                         {
-                            // Output filter computation
-                            if(filterComputation())
+                            // Resfresh the current state
+                            current_state->x = m_estimated_state.x;
+                            current_state->y = m_estimated_state.y;
+                            current_state->z = m_estimated_state.depth;
+                            current_state->phi = m_estimated_state.phi;
+                            current_state->theta = m_estimated_state.theta;
+                            current_state->psi = m_estimated_state.psi;
+                            current_state->timestamp = m_estimated_state.getTimeStamp();
+
+                            m_filter_sir->system->UpdateState(current_state);
+
+                            // Refresh the current observation
+                            for(int i=0;i<m_filter_sir_properties.observation_properties.num_beam;i++)
                             {
+                                current_observation->ray[i].range = m_ray[i].range;
+                                current_observation->ray[i].angle = m_ray[i].angle;
+                                current_observation->ray[i].intensity = m_ray[i].intensity;
+                            }
+
+                            m_filter_sir->system->UpdateObservation(current_observation);
+
+                            /*
+                            inf("current state: %f %f %f",
+                                m_filter_sir->system->current_state->x,
+                                m_filter_sir->system->current_state->y,
+                                m_filter_sir->system->current_state->z);
+
+                            inf("x:%f y:%f z:%f",
+                                m_filter_sir->system->previous_state->x,
+                                m_filter_sir->system->previous_state->y,
+                                m_filter_sir->system->previous_state->z);
+
+                            inf("dx:%f dy:%f dz%f",
+                                m_filter_sir->system->delta_state->x,
+                                m_filter_sir->system->delta_state->y,
+                                m_filter_sir->system->delta_state->z);
+
+                            for(int i=0;i<m_filter_sir_properties.observation_properties.num_beam;i++)
+                            {
+                                inf("Beam %d range %f angle %f intensity %f",
+                                i,
+                                m_filter_sir->system->current_observation->ray[i].range,
+                                m_filter_sir->system->current_observation->ray[i].angle,
+                                m_filter_sir->system->current_observation->ray[i].intensity);
+                            }
+                            */
+
+                            // Output filter computation
+                            if(m_filter_sir->Computation()==1)
+                            {
+                                m_filter_sir->ParticlesExportation(&m_particle_state.num, &m_particle_state.data);
+
+                                m_corrected_state.x = m_filter_sir->corrected_state->x;
+                                m_corrected_state.y = m_filter_sir->corrected_state->y;
+                                m_corrected_state.depth = m_filter_sir->corrected_state->z;
+
+                                m_corrected_state.phi = m_filter_sir->corrected_state->phi;
+                                m_corrected_state.theta = m_filter_sir->corrected_state->theta;
+                                m_corrected_state.psi = m_filter_sir->corrected_state->psi;
+
+                                inf("Estimated state: %f %f %f",
+                                    m_estimated_state.x,
+                                    m_estimated_state.y,
+                                    m_estimated_state.depth);
+
+                                inf("Corrected state: %f, %f, %f",
+                                    m_corrected_state.x,
+                                    m_corrected_state.y,
+                                    m_corrected_state.depth);
+
+                                //inf("number of particle exported: %d",m_particle_state.num);
+                                /*
+                                if(m_filter_kind == 2)
+                                {
+                                    for(int i=0;i<m_filter_sir_properties.num_particle;i++)
+                                    {
+                                        */
+                                        /*
+                                        inf("particle: %f %f %f weight %f",
+                                            m_filter_sir->particle[i]->state->x,
+                                            m_filter_sir->particle[i]->state->y,
+                                            m_filter_sir->particle[i]->state->z,
+                                            m_filter_sir->particle[i]->weight);
+
+                                        inf("selected: %f %f %f weight %f",
+                                            m_filter_sir->particle_selected[i]->state->x,
+                                            m_filter_sir->particle_selected[i]->state->y,
+                                            m_filter_sir->particle_selected[i]->state->z,
+                                            m_filter_sir->particle_selected[i]->weight);
+                                        */
+
+                                        /*
+                                        inf("Particle %d B0 %f B1 %f B2 %f B3 %f",
+                                        i,
+                                        m_filter_sir->particle[i]->observation->ray[0].range,
+                                        m_filter_sir->particle[i]->observation->ray[1].range,
+                                        m_filter_sir->particle[i]->observation->ray[2].range,
+                                        m_filter_sir->particle[i]->observation->ray[3].range);
+
+                                        inf("System B0 %f B1 %f B2 %f B3 %f",
+                                        m_filter_sir->system->current_observation->ray[0].range,
+                                        m_filter_sir->system->current_observation->ray[1].range,
+                                        m_filter_sir->system->current_observation->ray[2].range,
+                                        m_filter_sir->system->current_observation->ray[3].range);
+                                        */
+                                        /*
+                                        for(int s=0;s<m_filter_sir_properties.observation_properties.num_segment;s++)
+                                        {
+                                            inf("Sector %d : Particle %.2f %.2f System %.2f %.2f weight %.2f",
+                                                s,
+                                                m_filter_sir->particle[i]->observation->seg[s].value,
+                                                m_filter_sir->particle[i]->observation->seg[s].angle,
+                                                m_filter_sir->system->current_observation->seg[s].value,
+                                                m_filter_sir->system->current_observation->seg[s].angle,
+                                                m_filter_sir->particle[i]->weight);
+                                        }*/
+                                    /*
+                                    }
+                                }
+                                */
+
                                 // Update IMC message
                                 dispatch(m_corrected_state);
                                 dispatch(m_particle_state);
                             }
                         }
+
+                        // Final Time of processing (must be below of 1 seconde)
+                        timestop = Time::Clock::getUsec() - timestart;
+                        double time_wait = 0;
+                        if(timestop>0)
+                        {
+                            time_wait = m_args.iteration_time - (double)(timestop)/1000000;
+                            DUNE::Time::Delay::wait(time_wait);
+                        }
+                        u_int64_t restricted_iteration_time = Time::Clock::getUsec() - timestart;
+
+                        inf("Processing: %.0f ms, Waiting: %.0f ms, Real time %.0f ms", (float)timestop/1000, (float)time_wait*1000, (float)restricted_iteration_time/1000);
 
                         id_iteration++;
                     }

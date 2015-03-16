@@ -21,38 +21,47 @@
 // ANY KIND, either express or implied. See the Licence for the specific    *
 // language governing permissions and limitations at                        *
 // https://www.lsts.pt/dune/licence.                                        *
+//                                                                          *
 //***************************************************************************
-// Author: Ricardo Martins                                                  *
-//***************************************************************************
-// Automatically generated.                                                 *
-//***************************************************************************
-// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
+// Author: Frederic Leishman                                                *
 //***************************************************************************
 
-#ifndef DUNE_IMC_CONSTANTS_HPP_INCLUDED_
-#define DUNE_IMC_CONSTANTS_HPP_INCLUDED_
+#include <DUNE/DUNE.hpp>
+#include <DUNE/Math.hpp>
 
-//! IMC version string.
-#define DUNE_IMC_CONST_VERSION "5.4.3"
-//! Git repository information.
-#define DUNE_IMC_CONST_GIT_INFO "2014-11-12 a88a98e  (HEAD, origin/master, origin/HEAD, master)"
-//! MD5 sum of XML specification file.
-#define DUNE_IMC_CONST_MD5 "2d4515a60e0f62c97327dee68618cad4"
-//! Synchronization number.
-#define DUNE_IMC_CONST_SYNC 0xFE54
-//! Reversed synchronization number.
-#define DUNE_IMC_CONST_SYNC_REV 0x54FE
-//! Size of the header in bytes.
-#define DUNE_IMC_CONST_HEADER_SIZE 20
-//! Size of the footer in bytes.
-#define DUNE_IMC_CONST_FOOTER_SIZE 2
-//! Identification number of the null message.
-#define DUNE_IMC_CONST_NULL_ID 65535
-//! Maximum message data size.
-#define DUNE_IMC_CONST_MAX_SIZE 65535
-//! Unknown entity identifier.
-#define DUNE_IMC_CONST_UNK_EID 255
-//! System entity identifier.
-#define DUNE_IMC_CONST_SYS_EID 0
+#include <Localization/ParticleFilter/State.hpp>
 
-#endif
+namespace Localization
+{
+    namespace ParticleFilter
+    {
+
+        //! Constructor
+        State::State(State_Properties state_properties)
+        {
+            properties = state_properties;
+
+            x = properties.x_init;
+            y = properties.y_init;
+            z = properties.z_init;
+
+            phi = properties.phi_init;
+            theta = properties.theta_init;
+            psi = properties.psi_init;
+
+            timestamp = properties.timestamp_init;
+        }
+
+        //! Destructor
+        State::~State()
+        {
+        }
+
+        //! Get the state kind
+        int
+        State::GetType()
+        {
+            return properties.type;
+        }
+    }
+}

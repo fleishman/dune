@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: e07a0071cf6357872796799de8736a6a                            *
+// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
 //***************************************************************************
 
 #ifndef DUNE_IMC_DEFINITIONS_HPP_INCLUDED_
@@ -18225,6 +18225,261 @@ namespace DUNE
 
       void
       fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
+    };
+
+    //! Data MultiBeam Sonar.
+    class DataMBS: public Message
+    {
+    public:
+      //! NumByte.
+      uint16_t numbyte;
+      //! NumBeam.
+      uint16_t numbeam;
+      //! NumSampleBeam.
+      uint16_t numsamplebeam;
+      //! Sector Size.
+      uint16_t sectorsize;
+      //! StartAngle.
+      fp32_t startangle;
+      //! AngleIncrement.
+      fp32_t angleincrement;
+      //! Range.
+      uint16_t range;
+      //! SoundVelocity.
+      fp32_t soundvelocity;
+      //! RangeResolution.
+      fp32_t rangeresolution;
+      //! Speed.
+      fp32_t speed;
+      //! Data.
+      std::vector<char> data;
+
+      static uint16_t
+      getIdStatic(void)
+      {
+        return 852;
+      }
+
+      DataMBS(void);
+
+      Message*
+      clone(void) const
+      {
+        return new DataMBS(*this);
+      }
+
+      void
+      clear(void);
+
+      bool
+      fieldsEqual(const Message& msg__) const;
+
+      int
+      validate(void) const;
+
+      uint8_t*
+      serializeFields(uint8_t* bfr__) const;
+
+      uint16_t
+      deserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      getId(void) const
+      {
+        return DataMBS::getIdStatic();
+      }
+
+      const char*
+      getName(void) const
+      {
+        return "DataMBS";
+      }
+
+      unsigned
+      getFixedSerializationSize(void) const
+      {
+        return 30;
+      }
+
+      unsigned
+      getVariableSerializationSize(void) const
+      {
+        return IMC::getSerializationSize(data);
+      }
+
+      void
+      fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
+    };
+
+    //! Sensori-Motor State.
+    class SensoriMotorState: public Message
+    {
+    public:
+      //! Estimated State.
+      InlineMessage<EstimatedState> estimatedstate;
+      //! Data MultiBeam Sonar.
+      InlineMessage<DataMBS> datambs;
+
+      static uint16_t
+      getIdStatic(void)
+      {
+        return 860;
+      }
+
+      SensoriMotorState(void);
+
+      Message*
+      clone(void) const
+      {
+        return new SensoriMotorState(*this);
+      }
+
+      void
+      clear(void);
+
+      bool
+      fieldsEqual(const Message& msg__) const;
+
+      int
+      validate(void) const;
+
+      uint8_t*
+      serializeFields(uint8_t* bfr__) const;
+
+      uint16_t
+      deserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      getId(void) const
+      {
+        return SensoriMotorState::getIdStatic();
+      }
+
+      const char*
+      getName(void) const
+      {
+        return "SensoriMotorState";
+      }
+
+      unsigned
+      getFixedSerializationSize(void) const
+      {
+        return 0;
+      }
+
+      unsigned
+      getVariableSerializationSize(void) const
+      {
+        return estimatedstate.getSerializationSize() + datambs.getSerializationSize();
+      }
+
+      void
+      fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
+
+    protected:
+      void
+      setTimeStampNested(double value__);
+
+      void
+      setSourceNested(uint16_t value__);
+
+      void
+      setSourceEntityNested(uint8_t value__);
+
+      void
+      setDestinationNested(uint16_t value__);
+
+      void
+      setDestinationEntityNested(uint8_t value__);
+    };
+
+    //! Sensori-Motor Path.
+    class SensoriMotorPath: public Message
+    {
+    public:
+      //! Path.
+      MessageList<SensoriMotorState> data;
+
+      static uint16_t
+      getIdStatic(void)
+      {
+        return 861;
+      }
+
+      SensoriMotorPath(void);
+
+      Message*
+      clone(void) const
+      {
+        return new SensoriMotorPath(*this);
+      }
+
+      void
+      clear(void);
+
+      bool
+      fieldsEqual(const Message& msg__) const;
+
+      int
+      validate(void) const;
+
+      uint8_t*
+      serializeFields(uint8_t* bfr__) const;
+
+      uint16_t
+      deserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__);
+
+      uint16_t
+      getId(void) const
+      {
+        return SensoriMotorPath::getIdStatic();
+      }
+
+      const char*
+      getName(void) const
+      {
+        return "SensoriMotorPath";
+      }
+
+      unsigned
+      getFixedSerializationSize(void) const
+      {
+        return 0;
+      }
+
+      unsigned
+      getVariableSerializationSize(void) const
+      {
+        return data.getSerializationSize();
+      }
+
+      void
+      fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
+
+    protected:
+      void
+      setTimeStampNested(double value__);
+
+      void
+      setSourceNested(uint16_t value__);
+
+      void
+      setSourceEntityNested(uint8_t value__);
+
+      void
+      setDestinationNested(uint16_t value__);
+
+      void
+      setDestinationEntityNested(uint8_t value__);
     };
 
     //! Message Fragment.

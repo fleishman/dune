@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: e07a0071cf6357872796799de8736a6a                            *
+// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
 //***************************************************************************
 
 // ISO C++ 98 headers.
@@ -19088,6 +19088,343 @@ namespace DUNE
     {
       IMC::toJSON(os__, "num", num, nindent__);
       IMC::toJSON(os__, "data", data, nindent__);
+    }
+
+    DataMBS::DataMBS(void)
+    {
+      m_header.mgid = 852;
+      clear();
+    }
+
+    void
+    DataMBS::clear(void)
+    {
+      numbyte = 0;
+      numbeam = 0;
+      numsamplebeam = 0;
+      sectorsize = 0;
+      startangle = 0;
+      angleincrement = 0;
+      range = 0;
+      soundvelocity = 0;
+      rangeresolution = 0;
+      speed = 0;
+      data.clear();
+    }
+
+    bool
+    DataMBS::fieldsEqual(const Message& msg__) const
+    {
+      const IMC::DataMBS& other__ = static_cast<const DataMBS&>(msg__);
+      if (numbyte != other__.numbyte) return false;
+      if (numbeam != other__.numbeam) return false;
+      if (numsamplebeam != other__.numsamplebeam) return false;
+      if (sectorsize != other__.sectorsize) return false;
+      if (startangle != other__.startangle) return false;
+      if (angleincrement != other__.angleincrement) return false;
+      if (range != other__.range) return false;
+      if (soundvelocity != other__.soundvelocity) return false;
+      if (rangeresolution != other__.rangeresolution) return false;
+      if (speed != other__.speed) return false;
+      if (data != other__.data) return false;
+      return true;
+    }
+
+    int
+    DataMBS::validate(void) const
+    {
+      return false;
+    }
+
+    uint8_t*
+    DataMBS::serializeFields(uint8_t* bfr__) const
+    {
+      uint8_t* ptr__ = bfr__;
+      ptr__ += IMC::serialize(numbyte, ptr__);
+      ptr__ += IMC::serialize(numbeam, ptr__);
+      ptr__ += IMC::serialize(numsamplebeam, ptr__);
+      ptr__ += IMC::serialize(sectorsize, ptr__);
+      ptr__ += IMC::serialize(startangle, ptr__);
+      ptr__ += IMC::serialize(angleincrement, ptr__);
+      ptr__ += IMC::serialize(range, ptr__);
+      ptr__ += IMC::serialize(soundvelocity, ptr__);
+      ptr__ += IMC::serialize(rangeresolution, ptr__);
+      ptr__ += IMC::serialize(speed, ptr__);
+      ptr__ += IMC::serialize(data, ptr__);
+      return ptr__;
+    }
+
+    uint16_t
+    DataMBS::deserializeFields(const uint8_t* bfr__, uint16_t size__)
+    {
+      const uint8_t* start__ = bfr__;
+      bfr__ += IMC::deserialize(numbyte, bfr__, size__);
+      bfr__ += IMC::deserialize(numbeam, bfr__, size__);
+      bfr__ += IMC::deserialize(numsamplebeam, bfr__, size__);
+      bfr__ += IMC::deserialize(sectorsize, bfr__, size__);
+      bfr__ += IMC::deserialize(startangle, bfr__, size__);
+      bfr__ += IMC::deserialize(angleincrement, bfr__, size__);
+      bfr__ += IMC::deserialize(range, bfr__, size__);
+      bfr__ += IMC::deserialize(soundvelocity, bfr__, size__);
+      bfr__ += IMC::deserialize(rangeresolution, bfr__, size__);
+      bfr__ += IMC::deserialize(speed, bfr__, size__);
+      bfr__ += IMC::deserialize(data, bfr__, size__);
+      return bfr__ - start__;
+    }
+
+    uint16_t
+    DataMBS::reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__)
+    {
+      const uint8_t* start__ = bfr__;
+      bfr__ += IMC::reverseDeserialize(numbyte, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(numbeam, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(numsamplebeam, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(sectorsize, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(startangle, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(angleincrement, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(range, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(soundvelocity, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(rangeresolution, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(speed, bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(data, bfr__, size__);
+      return bfr__ - start__;
+    }
+
+    void
+    DataMBS::fieldsToJSON(std::ostream& os__, unsigned nindent__) const
+    {
+      IMC::toJSON(os__, "numbyte", numbyte, nindent__);
+      IMC::toJSON(os__, "numbeam", numbeam, nindent__);
+      IMC::toJSON(os__, "numsamplebeam", numsamplebeam, nindent__);
+      IMC::toJSON(os__, "sectorsize", sectorsize, nindent__);
+      IMC::toJSON(os__, "startangle", startangle, nindent__);
+      IMC::toJSON(os__, "angleincrement", angleincrement, nindent__);
+      IMC::toJSON(os__, "range", range, nindent__);
+      IMC::toJSON(os__, "soundvelocity", soundvelocity, nindent__);
+      IMC::toJSON(os__, "rangeresolution", rangeresolution, nindent__);
+      IMC::toJSON(os__, "speed", speed, nindent__);
+      IMC::toJSON(os__, "data", data, nindent__);
+    }
+
+    SensoriMotorState::SensoriMotorState(void)
+    {
+      m_header.mgid = 860;
+      clear();
+      estimatedstate.setParent(this);
+      datambs.setParent(this);
+    }
+
+    void
+    SensoriMotorState::clear(void)
+    {
+      estimatedstate.clear();
+      datambs.clear();
+    }
+
+    bool
+    SensoriMotorState::fieldsEqual(const Message& msg__) const
+    {
+      const IMC::SensoriMotorState& other__ = static_cast<const SensoriMotorState&>(msg__);
+      if (estimatedstate != other__.estimatedstate) return false;
+      if (datambs != other__.datambs) return false;
+      return true;
+    }
+
+    int
+    SensoriMotorState::validate(void) const
+    {
+      return false;
+    }
+
+    uint8_t*
+    SensoriMotorState::serializeFields(uint8_t* bfr__) const
+    {
+      uint8_t* ptr__ = bfr__;
+      ptr__ += estimatedstate.serialize(ptr__);
+      ptr__ += datambs.serialize(ptr__);
+      return ptr__;
+    }
+
+    uint16_t
+    SensoriMotorState::deserializeFields(const uint8_t* bfr__, uint16_t size__)
+    {
+      const uint8_t* start__ = bfr__;
+      bfr__ += estimatedstate.deserialize(bfr__, size__);
+      bfr__ += datambs.deserialize(bfr__, size__);
+      return bfr__ - start__;
+    }
+
+    uint16_t
+    SensoriMotorState::reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__)
+    {
+      const uint8_t* start__ = bfr__;
+      bfr__ += estimatedstate.reverseDeserialize(bfr__, size__);
+      bfr__ += datambs.reverseDeserialize(bfr__, size__);
+      return bfr__ - start__;
+    }
+
+    void
+    SensoriMotorState::fieldsToJSON(std::ostream& os__, unsigned nindent__) const
+    {
+      estimatedstate.toJSON(os__, "estimatedstate", nindent__);
+      datambs.toJSON(os__, "datambs", nindent__);
+    }
+
+    void
+    SensoriMotorState::setTimeStampNested(double value__)
+    {
+      if (!estimatedstate.isNull())
+      {
+        estimatedstate.get()->setTimeStamp(value__);
+      }
+
+      if (!datambs.isNull())
+      {
+        datambs.get()->setTimeStamp(value__);
+      }
+    }
+
+    void
+    SensoriMotorState::setSourceNested(uint16_t value__)
+    {
+      if (!estimatedstate.isNull())
+      {
+        estimatedstate.get()->setSource(value__);
+      }
+
+      if (!datambs.isNull())
+      {
+        datambs.get()->setSource(value__);
+      }
+    }
+
+    void
+    SensoriMotorState::setSourceEntityNested(uint8_t value__)
+    {
+      if (!estimatedstate.isNull())
+      {
+        estimatedstate.get()->setSourceEntity(value__);
+      }
+
+      if (!datambs.isNull())
+      {
+        datambs.get()->setSourceEntity(value__);
+      }
+    }
+
+    void
+    SensoriMotorState::setDestinationNested(uint16_t value__)
+    {
+      if (!estimatedstate.isNull())
+      {
+        estimatedstate.get()->setDestination(value__);
+      }
+
+      if (!datambs.isNull())
+      {
+        datambs.get()->setDestination(value__);
+      }
+    }
+
+    void
+    SensoriMotorState::setDestinationEntityNested(uint8_t value__)
+    {
+      if (!estimatedstate.isNull())
+      {
+        estimatedstate.get()->setDestinationEntity(value__);
+      }
+
+      if (!datambs.isNull())
+      {
+        datambs.get()->setDestinationEntity(value__);
+      }
+    }
+
+    SensoriMotorPath::SensoriMotorPath(void)
+    {
+      m_header.mgid = 861;
+      clear();
+      data.setParent(this);
+    }
+
+    void
+    SensoriMotorPath::clear(void)
+    {
+      data.clear();
+    }
+
+    bool
+    SensoriMotorPath::fieldsEqual(const Message& msg__) const
+    {
+      const IMC::SensoriMotorPath& other__ = static_cast<const SensoriMotorPath&>(msg__);
+      if (data != other__.data) return false;
+      return true;
+    }
+
+    int
+    SensoriMotorPath::validate(void) const
+    {
+      return false;
+    }
+
+    uint8_t*
+    SensoriMotorPath::serializeFields(uint8_t* bfr__) const
+    {
+      uint8_t* ptr__ = bfr__;
+      ptr__ += data.serialize(ptr__);
+      return ptr__;
+    }
+
+    uint16_t
+    SensoriMotorPath::deserializeFields(const uint8_t* bfr__, uint16_t size__)
+    {
+      const uint8_t* start__ = bfr__;
+      bfr__ += data.deserialize(bfr__, size__);
+      return bfr__ - start__;
+    }
+
+    uint16_t
+    SensoriMotorPath::reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__)
+    {
+      const uint8_t* start__ = bfr__;
+      bfr__ += data.reverseDeserialize(bfr__, size__);
+      return bfr__ - start__;
+    }
+
+    void
+    SensoriMotorPath::fieldsToJSON(std::ostream& os__, unsigned nindent__) const
+    {
+      data.toJSON(os__, "data", nindent__);
+    }
+
+    void
+    SensoriMotorPath::setTimeStampNested(double value__)
+    {
+      data.setTimeStamp(value__);
+    }
+
+    void
+    SensoriMotorPath::setSourceNested(uint16_t value__)
+    {
+      data.setSource(value__);
+    }
+
+    void
+    SensoriMotorPath::setSourceEntityNested(uint8_t value__)
+    {
+      data.setSourceEntity(value__);
+    }
+
+    void
+    SensoriMotorPath::setDestinationNested(uint16_t value__)
+    {
+      data.setDestination(value__);
+    }
+
+    void
+    SensoriMotorPath::setDestinationEntityNested(uint8_t value__)
+    {
+      data.setDestinationEntity(value__);
     }
 
     MessagePart::MessagePart(void)

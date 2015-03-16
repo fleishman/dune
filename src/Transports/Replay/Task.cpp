@@ -23,6 +23,12 @@
 // https://www.lsts.pt/dune/licence.                                        *
 //***************************************************************************
 // Author: Eduardo Marques                                                  *
+//         Frédéric Leishman                                                *
+//                                                                          *
+//  Addition of the multibeam replay using the Data.83P file localized in   *
+//  the same path that the replayed log. The multibeam data is conditionned *
+//  in Imc message called DataMbs that are dispatched at the right time.    *
+//                                                                          *
 //***************************************************************************
 
 // ISO C++ 98 headers.
@@ -30,6 +36,7 @@
 #include <vector>
 #include <map>
 #include <fstream>
+#include <time.h>
 
 // DUNE headers.
 #include <DUNE/DUNE.hpp>
@@ -70,11 +77,29 @@ namespace Transports
 
       // Replay file handle
       std::ifstream* m_ifs;
-      // last state from replay file
+      // Last state from replay file
       IMC::EstimatedState m_estate;
       // IMC parser handle
       IMC::Parser m_parser;
 
+/**/
+      // Replay 83P file handle
+      std::ifstream* m_ifs_mbs;
+      // Multibeam file path
+      std::string m_mbs_path;
+      // Activation State of MBS replay
+      bool m_mbs_flag;
+      // IMC Message for the MBS simulation replay
+      IMC::DataMBS m_data_mbs;
+      // Initial time considered in the MBS file
+      double m_initial_time_mbs;
+      // Size of the MBS dataraw
+      int m_size_data_mbs;
+      // Buffer used for the MBS Header
+      char* m_buffer_header;
+      // Buffer used for the MBS Dataraw
+      char* m_buffer_data;
+/**/
       struct Stats
       {
         Stats(): count(0), min(10), max(0), sum(0) { }
@@ -245,6 +270,169 @@ namespace Transports
           return;
         }
 
+/**/
+        // Get the MBS binary file if Data.83P is present
+        m_mbs_path = Path(file).dirname().c_str();
+        m_mbs_path = m_mbs_path +"/Data.83P";
+        m_mbs_flag = false;
+
+        if(Path(m_mbs_path).isFile())
+        {
+            try
+            {
+              m_ifs_mbs = new std::ifstream(m_mbs_path.c_str(), std::ios::binary);
+            }
+            catch (std::exception& e)
+            {
+              err("%s '%s': %s", DTR("could not open"), m_mbs_path.c_str(), e.what());
+              return;
+            }
+
+            // Update the activation state of the mbs replay
+            m_mbs_flag = true;
+            war("Multibeam Replay is activated");
+
+            // Get the first MBS header
+            m_buffer_header = new char[256];
+            m_ifs_mbs->read(m_buffer_header, 256);
+
+            // Number of byte per ping
+            m_data_mbs.numbyte = (uint8_t)m_buffer_header[4]<<8|(uint8_t)m_buffer_header[5];
+
+            // Number of beam
+            m_data_mbs.numbeam = (uint8_t)m_buffer_header[70]<<8|(uint8_t)m_buffer_header[71];
+
+            // Number of sample per beam
+            m_data_mbs.numsamplebeam = (uint8_t)m_buffer_header[72]<<8|(uint8_t)m_buffer_header[73];
+
+            // Sector size
+            m_data_mbs.sectorsize = (uint8_t)m_buffer_header[74]<<8|(uint8_t)m_buffer_header[75];
+
+            // Start angle
+            m_data_mbs.startangle = (fp32_t)((uint8_t)m_buffer_header[76]<<8|(uint8_t)m_buffer_header[77])/100+180;
+
+            // Increment angle
+            m_data_mbs.angleincrement = (fp32_t)((uint8_t)m_buffer_header[78])/100;
+
+            // Range maximum
+            m_data_mbs.range = (uint8_t)m_buffer_header[79]<<8|(uint8_t)m_buffer_header[80];
+
+            // Sound Velocity from sensor
+            if((uint8_t)m_buffer_header[83]>>7==0)
+            {
+                m_data_mbs.soundvelocity = 1500;
+            }
+            else
+            {
+                m_data_mbs.soundvelocity = (fp32_t)(((uint8_t)m_buffer_header[83]&0x7F)<<8|(uint8_t)m_buffer_header[84])/10;
+            }
+
+            // Range resolution
+            m_data_mbs.rangeresolution = (fp32_t)((uint8_t)m_buffer_header[85]<<8|(uint8_t)m_buffer_header[86])*0.001 ;
+
+            // Speed of the vehicle
+            m_data_mbs.speed = (fp32_t)((uint8_t)m_buffer_header[61])/10*0.5144444;
+
+            // Original TimeStamp
+            struct tm tm;
+            memset(&tm, 0, sizeof(struct tm));
+
+            tm.tm_year = atoi(&m_buffer_header[15])-1900; //utc since 1970 and ntp since 1900
+
+            char str_month[4] = {m_buffer_header[11], m_buffer_header[12], m_buffer_header[13], '\0'};
+
+            if(strcmp(str_month,"JAN")==0)
+            {
+                tm.tm_mon = 0;
+            }
+            else if(strcmp(str_month,"FEB")==0)
+            {
+                tm.tm_mon = 1;
+            }
+            else if(strcmp(str_month,"MAR")==0)
+            {
+                tm.tm_mon = 2;
+            }
+            else if(strcmp(str_month,"APR")==0)
+            {
+                tm.tm_mon = 3;
+            }
+            else if(strcmp(str_month,"MAY")==0)
+            {
+                tm.tm_mon = 4;
+            }
+            else if(strcmp(str_month,"JUN")==0)
+            {
+                tm.tm_mon = 5;
+            }
+            else if(strcmp(str_month,"JUL")==0)
+            {
+                tm.tm_mon = 6;
+            }
+            else if(strcmp(str_month,"AUG")==0)
+            {
+                tm.tm_mon = 7;
+            }
+            else if(strcmp(str_month,"SEP")==0)
+            {
+                tm.tm_mon = 8;
+            }
+            else if(strcmp(str_month,"OCT")==0)
+            {
+                tm.tm_mon = 9;
+            }
+            else if(strcmp(str_month,"NOV")==0)
+            {
+                tm.tm_mon = 10;
+            }
+            else if(strcmp(str_month,"DEC")==0)
+            {
+                tm.tm_mon = 11;
+            }
+
+            tm.tm_mday = atoi(&m_buffer_header[8]);
+            tm.tm_hour = atoi(&m_buffer_header[20]);
+            tm.tm_min = atoi(&m_buffer_header[23]);
+            tm.tm_sec = atoi(&m_buffer_header[26]);
+
+            // Reference TimeStamp(s) for the MBS (localtime NTP -> UTC)
+            m_initial_time_mbs = (double) mktime(&tm);
+            m_initial_time_mbs += (double)atoi(&m_buffer_header[113])/1000;
+            m_data_mbs.setTimeStamp(m_initial_time_mbs);
+
+            /*
+            // Display MBS parameters
+            inf("Multibeam parameters");
+            inf("File extention .%c%c%c", m_buffer_header[0], m_buffer_header[1], m_buffer_header[2]);
+            inf("Byte number: %d", m_data_mbs.numbyte);
+            inf("Beam number: %d", m_data_mbs.numbeam);
+            inf("Sample/beam number: %d", m_data_mbs.numsamplebeam);
+            inf("Sector size: %d°", m_data_mbs.sectorsize);
+            inf("Start angle: %.2f°", m_data_mbs.startangle);
+            inf("Angle increment: %.2f°", m_data_mbs.angleincrement);
+            inf("Range: %dm", m_data_mbs.range);
+            inf("Sound Velocity: %.2fm/s", m_data_mbs.soundvelocity);
+            inf("Range resolution: %.3fm", m_data_mbs.rangeresolution);
+            inf("Vehicle speed: %.2fm/s", m_data_mbs.speed);
+            inf("First TimeStamp: %f __ %d/%d/%d %d:%d:%d", m_initial_time_mbs, tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+            */
+
+            // Get the first MBS data
+            m_data_mbs.data.clear();
+
+            // Size of the dataraw
+            m_size_data_mbs = m_data_mbs.numbyte - 256;
+            m_buffer_data = new char[m_size_data_mbs];
+
+            // Get the decrypted dataraw
+            m_ifs_mbs->read(m_buffer_data, m_size_data_mbs);
+
+            // Initialise the Imc message dataraw with the first Mbs message
+            m_data_mbs.data.insert(m_data_mbs.data.end(),&m_buffer_data[0], &m_buffer_data[0] + m_size_data_mbs);
+        }     
+/**/
+
+
         IMC::LoggingControl* lc = static_cast<IMC::LoggingControl*>(m);
 
         m_ts_delta = lc->getTimeStamp();
@@ -267,6 +455,88 @@ namespace Transports
         war("%s '%s'", DTR("started replay of"), file.c_str());
         m_parser.reset();
       }
+
+/**/
+      void
+      GetDataMBS()
+      {
+          // Get the MBS header
+          m_ifs_mbs->read(m_buffer_header, 256);
+
+          // Refresh only the TimeStamp
+          struct tm tm;
+          memset(&tm, 0, sizeof(struct tm));
+
+          tm.tm_year = atoi(&m_buffer_header[15])-1900;
+
+          char str_month[4] = {m_buffer_header[11], m_buffer_header[12], m_buffer_header[13], '\0'};
+
+          if(strcmp(str_month,"JAN")==0)
+          {
+              tm.tm_mon = 0;
+          }
+          else if(strcmp(str_month,"FEB")==0)
+          {
+              tm.tm_mon = 1;
+          }
+          else if(strcmp(str_month,"MAR")==0)
+          {
+              tm.tm_mon = 2;
+          }
+          else if(strcmp(str_month,"APR")==0)
+          {
+              tm.tm_mon = 3;
+          }
+          else if(strcmp(str_month,"MAY")==0)
+          {
+              tm.tm_mon = 4;
+          }
+          else if(strcmp(str_month,"JUN")==0)
+          {
+              tm.tm_mon = 5;
+          }
+          else if(strcmp(str_month,"JUL")==0)
+          {
+              tm.tm_mon = 6;
+          }
+          else if(strcmp(str_month,"AUG")==0)
+          {
+              tm.tm_mon = 7;
+          }
+          else if(strcmp(str_month,"SEP")==0)
+          {
+              tm.tm_mon = 8;
+          }
+          else if(strcmp(str_month,"OCT")==0)
+          {
+              tm.tm_mon = 9;
+          }
+          else if(strcmp(str_month,"NOV")==0)
+          {
+              tm.tm_mon = 10;
+          }
+          else if(strcmp(str_month,"DEC")==0)
+          {
+              tm.tm_mon = 11;
+          }
+
+          tm.tm_mday = atoi(&m_buffer_header[8]);
+          tm.tm_hour = atoi(&m_buffer_header[20]);
+          tm.tm_min = atoi(&m_buffer_header[23]);
+          tm.tm_sec = atoi(&m_buffer_header[26]);
+
+          // TimeStamp (s) with milliseconds
+          double time_mbs = (double) mktime(&tm);
+          time_mbs += (double)atoi(&m_buffer_header[113])/1000;
+          m_data_mbs.setTimeStamp(time_mbs);
+
+          // Get the first MBS data
+          m_data_mbs.data.clear();
+          m_size_data_mbs = m_data_mbs.numbyte - 256;
+          m_ifs_mbs->read(m_buffer_data, m_size_data_mbs);
+          m_data_mbs.data.insert(m_data_mbs.data.end(),&m_buffer_data[0], &m_buffer_data[0] + m_size_data_mbs);
+      }
+/**/
 
       void
       stopReplay(void)
@@ -318,6 +588,16 @@ namespace Transports
           delete m_ifs;
           m_ifs = 0;
         }
+
+/**/
+        // Clean the Mbs Handle
+        if(m_ifs_mbs)
+        {
+            delete m_ifs_mbs;
+            m_ifs_mbs = 0;
+        }
+/**/
+
         m_eid2eid.clear();
         m_name2eid.clear();
         m_eid2name.clear();
@@ -428,6 +708,36 @@ namespace Transports
             trace("%s %0.4f %s", m->getName(), (new_ts - m_start_time),
                   m_eid2name[m->getSourceEntity()].c_str());
           }
+
+/**/
+          // Only if Multibeam replay is activated
+          if(m_mbs_flag == true)
+          {
+              // Actual time
+              double now = Clock::getSinceEpoch();
+
+              // Mbs time
+              double ts_mbs = m_data_mbs.getTimeStamp();
+
+              // Test the waiting phase
+              //inf("wait!!!!! delta actual: %f, delta message: %f", (now-m_start_time), (ts_mbs-m_initial_time_mbs));
+
+              if((ts_mbs-m_initial_time_mbs) <= (now-m_start_time))
+              {
+                // Test the delta error when it's the time to dispatch
+                //war("dispatch!!!!! delta actual: %f, delta message: %f", (now-m_start_time), (ts_mbs-m_initial_time_mbs));
+
+                // TimeStamp refresh
+                m_data_mbs.setTimeStamp(now);
+
+                // Diffuse the Mbs Imc messages
+                dispatch(m_data_mbs);
+
+                // Get the next multibeam message
+                GetDataMBS();
+              }
+          }
+/**/
 
           // Clean up
           delete m;
