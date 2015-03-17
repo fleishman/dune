@@ -34,7 +34,6 @@
 
 using namespace std;
 
-
 namespace Navigation
 {
   namespace Sensorimotor
@@ -43,27 +42,47 @@ namespace Navigation
     {
         using DUNE_NAMESPACES;
 
+        struct Arguments
+        {
+            //! State of the path recorder
+            std::string state_little_thumb_control;
+        };
+
         struct Position
         {
             //! NED reference
-            float x;
-            float y;
-            float z;
-            float v;
+            double x;
+            double y;
+            double z;
+            double v;
         };
 
-        struct Error
+        struct Drift
         {
-            //! NED reference
-            float x;
-            float y;
+            //! NED drift
+            double x;
+            double y;
+            double z;
         };
 
-        u_int64_t id_iteration;
+        struct Recorded_Trajectory
+        {
+           // Recorded Trajectory
+            std::vector<IMC::SensoriMotorState> list_sensorimotor_state;
+
+            // Trajectory valid
+            int validation;
+        };
 
         struct Task: public DUNE::Tasks::Task
         {
             // IMC sent messages
+            //! State of the path recorder
+            IMC::PathRecorderState path_recorder_state;
+
+            //! Sensorimotor State
+            IMC::SensoriMotorState sensorimotor_state;
+
             //! Follow Reference message
             IMC::FollowReference follow_reference;
 
@@ -71,29 +90,24 @@ namespace Navigation
             IMC::Reference reference;
 
             //! Plan messages
-            IMC::PlanControl pc_on;
-            IMC::PlanControl pc_off;
-            IMC::PlanSpecification ps;
-            IMC::PlanManeuver pm;
+            IMC::PlanControl plan_control_on;
+            IMC::PlanControl plan_control_off;
+            IMC::PlanSpecification plan_specification;
+            IMC::PlanManeuver plan_maneuver;
 
             //! Robot's state messages
-            IMC::DesiredSpeed ds;
-            IMC::DesiredZ dz;
+            IMC::DesiredSpeed desired_speed;
+            IMC::DesiredZ desired_z;
 
             // IMC received messages
             //! State of the Follow Reference maneuver
             IMC::FollowRefState follow_ref_state;
 
             //! Robot's estimated state
-            IMC::EstimatedState es;
-
-            //! Robot's sensorimotor path
-            IMC::SensoriMotorPath smp;
+            IMC::EstimatedState estimated_state;
 
             //! Robot's corrected state
-            IMC::CorrectedState robot_pos;
-            IMC::CorrectedState old_robot_pos;
-
+            IMC::CorrectedState corrected_state;
 
             //Task phases control
             //! True if task is activating.
@@ -105,8 +119,24 @@ namespace Navigation
             //! Activation/deactivation timer.
             Counter<double> m_countdown;
 
+            // Parameters Config Structure
+            //! Task arguments.
+            Arguments m_args;
 
-            std::list<Position> PositionsList;
+            // Trajectory Structure
+            Recorded_Trajectory trajectory;
+
+            // State of the control
+            int control_state;
+
+            // State of the path recording
+            int start_trajectory_flag;
+
+            // Recording enabled
+            int recording_enabled;
+
+            // Drift between estimated and corrected states
+            Drift drift;
 
             //! Constructor.
             //! @param[in] name task name.
@@ -120,40 +150,73 @@ namespace Navigation
                 paramActive(Tasks::Parameter::SCOPE_MANEUVER,
                             Tasks::Parameter::VISIBILITY_USER);
 
+                param(DTR_RT("State"), m_args.state_little_thumb_control)
+                 .values(DTR_RT("Start, Stop"))
+                 .defaultValue("Stop")
+                 .description(DTR("State of the path recorder"))
+                 .visibility(Tasks::Parameter::VISIBILITY_USER)
+                 .scope(Tasks::Parameter::SCOPE_MANEUVER);
+
+                if(strcmp(m_args.state_little_thumb_control.c_str(),"Start")==0)
+                {
+                    control_state = 1;
+                }
+
+                if(strcmp(m_args.state_little_thumb_control.c_str(),"Stop")==0)
+                {
+                    control_state = 0;
+                }
+
+                // Initialization of the trajectory
+                trajectory.list_sensorimotor_state.clear();
+                trajectory.validation = 0;
+
+                recording_enabled = 0;
+                start_trajectory_flag = 0;
+
+                // drift initialization
+                drift.x = 0;
+                drift.y = 0;
+                drift.z = 0;
+
                 // Initialize messages.
                 clearMessages();
 
                 // List of message consume by the sensorimotor controller
                 bind<IMC::EstimatedState>(this);
                 bind<IMC::FollowRefState>(this);
-                bind<IMC::SensoriMotorPath>(this);
                 bind<IMC::CorrectedState>(this);
+                bind<IMC::PathRecorderState>(this);
+                bind<IMC::SensoriMotorState>(this);
             }
 
             //! clear messages
             void
             clearMessages(void)
             {
-                es.clear();
-                ds.clear();
-                dz.clear();
-                pm.clear();
-                ps.clear();
-                smp.clear();
-                pc_on.clear();
-                pc_off.clear();
+                estimated_state.clear();
+                corrected_state.clear();
+
+                desired_speed.clear();
+                desired_z.clear();
+                plan_maneuver.clear();
+                plan_specification.clear();
+                plan_control_on.clear();
+                plan_control_off.clear();
+
                 reference.clear();
                 follow_reference.clear();
                 follow_ref_state.clear();
-                robot_pos.clear();
-                old_robot_pos.clear();
+
+                path_recorder_state.clear();
+                sensorimotor_state.clear();
             }
 
             //! consume messages
             void
             consume(const IMC::EstimatedState* msg)
             {
-                es = *msg;
+                estimated_state = *msg;
             }
 
             void
@@ -163,22 +226,72 @@ namespace Navigation
             }
 
             void
-            consume(const IMC::SensoriMotorPath* msg)
+            consume(const IMC::CorrectedState* msg)
             {
-                smp = *msg;
-                inf("SMP received");
+                corrected_state = *msg;
+
+                // Compute the drift
+                drift.x = estimated_state.x - corrected_state.x;
+                drift.y = estimated_state.y - corrected_state.y;
+                drift.z = estimated_state.depth - corrected_state.z;
             }
 
             void
-            consume(const IMC::CorrectedState* msg)
+            consume(const IMC::PathRecorderState *msg)
             {
-                robot_pos = *msg;
+                path_recorder_state = *msg;
+
+                if(recording_enabled == 1)
+                {
+                    if( (path_recorder_state.id == 1) && (start_trajectory_flag == 0) )
+                    {
+                        trajectory.validation = 0;
+                        trajectory.list_sensorimotor_state.clear();
+                        start_trajectory_flag = 1;
+                    }
+
+                    if( (path_recorder_state.id == 0) && (start_trajectory_flag == 1) )
+                    {
+                        start_trajectory_flag = 0;
+                        trajectory.validation = 1;
+                    }
+                }
+            }
+
+            void
+            consume(const IMC::SensoriMotorState *msg)
+            {
+                sensorimotor_state = *msg;
+
+                if(start_trajectory_flag == 1)
+                {
+                    trajectory.list_sensorimotor_state.push_back(sensorimotor_state);
+                }
             }
 
             //! Update internal state with new parameter values.
             void
             onUpdateParameters(void)
             {
+                if(strcmp(m_args.state_little_thumb_control.c_str(),"Start")==0)
+                {
+                    control_state = 1;
+                }
+
+                if(strcmp(m_args.state_little_thumb_control.c_str(),"Stop")==0)
+                {
+                    control_state = 0;
+                }
+
+                if( (control_state == 0) && (recording_enabled == 0) )
+                {
+                    recording_enabled = 1;
+                }
+
+                if( (control_state == 1) && (recording_enabled == 1) )
+                {
+                    recording_enabled = 0;
+                }
             }
 
             //! Reserve entity identifiers.
@@ -225,16 +338,9 @@ namespace Navigation
             void
             onActivation(void)
             {
+                inf("Activation phase begun");
                 setEntityState(IMC::EntityState::ESTA_NORMAL, Status::CODE_ACTIVE);
                 m_activating = false;
-
-                //!Initialization and checking phase
-
-                inf("Activation phase begun");
-
-                //Initialization of iteration number
-                id_iteration = 0;
-
                 inf("Activation phase finished");
             }
 
@@ -291,45 +397,32 @@ namespace Navigation
             Checking()
             {
                 // IMC message getting checking
-                if(es.getTimeStamp() == -1)      {return false;}
-                if(robot_pos.getTimeStamp() == -1)      {return false;}
-
-                // IMC message getting checking
-                if(smp.getTimeStamp() == -1)      {return false;}
+                if(estimated_state.getTimeStamp() == -1)      {return false;}
 
                 // All is ok
-                return true;
-            }
-
-            //! Check if new robot position is received
-            bool
-            CheckIfNewRobotPos()
-            {
-                if(robot_pos.getTimeStamp() == old_robot_pos.getTimeStamp())
-                    return false;
-
                 return true;
             }
 
 
             //! Set the reference of the Follow Reference maneuver
             void
-            SetReference(IMC::SensoriMotorState state, Error error)
+            SetReference(IMC::SensoriMotorState sms)
             {
 
-                IMC::EstimatedState pos = *(state.estimatedstate.get());
-                float x = pos.x + error.x;
-                float y = pos.y + error.y;
-                float lat0 = pos.lat;
-                float lon0 = pos.lon;
+                IMC::EstimatedState state = *(sms.estimatedstate.get());
+                float x = state.x + drift.x;
+                float y = state.y + drift.y;
+                float z = state.z + drift.z;
+                float lat0 = state.lat;
+                float lon0 = state.lon;
 
                 WGS84::displace(x, y, &lat0, &lon0);
                 reference.lat = lat0;
                 reference.lon = lon0;
 
                 reference.flags = IMC::Reference::FLAG_LOCATION;
-                SetDesiredSpeed(pos.v);
-                SetDesiredZ(pos.z);
+                SetDesiredSpeed(state.v);
+                SetDesiredZ(z);
                 //reference.radius = 1;
 
             }
@@ -338,18 +431,18 @@ namespace Navigation
             void
             SetDesiredZ(float z)
             {
-                dz.value = z;
-                dz.z_units = IMC::Z_DEPTH;
-                reference.z.set(dz);
+                desired_z.value = z;
+                desired_z.z_units = IMC::Z_DEPTH;
+                reference.z.set(desired_z);
             }
 
             //! Set the desired speed
             void
             SetDesiredSpeed(float v)
             {
-                ds.value = v;
-                ds.speed_units = IMC::SUNITS_METERS_PS;
-                reference.speed.set(ds);
+                desired_speed.value = v;
+                desired_speed.speed_units = IMC::SUNITS_METERS_PS;
+                reference.speed.set(desired_speed);
             }
 
 
@@ -362,30 +455,30 @@ namespace Navigation
             void
             StartPlan(void)
             {
-                inf("Start the plan with the Follow Reference maneuver!");
+                inf("Start the plan with the Follow Reference maneuver");
                 //IMC::FollowReference follow_reference;
                 follow_reference.control_ent = 255;
                 follow_reference.control_src = 0xFFFF;
 
                 //IMC::PlanManeuver pm;
-                pm.data.set(follow_reference);
-                pm.maneuver_id = "sensorimotorcontrol";
+                plan_maneuver.data.set(follow_reference);
+                plan_maneuver.maneuver_id = "sensorimotorcontrol";
 
                 //IMC::PlanSpecification ps;
-                ps.plan_id = "sensorimotor_plan";
-                ps.start_man_id = "sensorimotorcontrol";
-                ps.maneuvers.push_back(pm);
+                plan_specification.plan_id = "sensorimotor_plan";
+                plan_specification.start_man_id = "sensorimotorcontrol";
+                plan_specification.maneuvers.push_back(plan_maneuver);
 
                 //IMC::PlanControl pc_on;
-                pc_on.type = IMC::PlanControl::PC_REQUEST;
-                pc_on.op = IMC::PlanControl::PC_START;
-                pc_on.plan_id = "sensorimotor_plan";
-                pc_on.arg.set(ps);
-                pc_on.request_id = 0;
-                pc_on.flags = 0;
+                plan_control_on.type = IMC::PlanControl::PC_REQUEST;
+                plan_control_on.op = IMC::PlanControl::PC_START;
+                plan_control_on.plan_id = "sensorimotor_plan";
+                plan_control_on.arg.set(plan_specification);
+                plan_control_on.request_id = 0;
+                plan_control_on.flags = 0;
 
-                dispatch(pc_on);
-
+                dispatch(plan_control_on);
+                inf("Plan defined");
             }
 
             //! 1. Stop the plan
@@ -393,52 +486,31 @@ namespace Navigation
             StopPlan(void)
             {
                 inf("Stop the plan with the follow reference maneuver!");
-                pc_off.type = IMC::PlanControl::PC_REQUEST;
-                pc_off.op = IMC::PlanControl::PC_START;
-                pc_off.plan_id = "sensorimotor_plan";
+                plan_control_off.type = IMC::PlanControl::PC_REQUEST;
+                plan_control_off.op = IMC::PlanControl::PC_START;
+                plan_control_off.plan_id = "sensorimotor_plan";
 
-                dispatch(pc_off);
+                dispatch(plan_control_off);
             }
-
-
-            //! Compute the error between the robot's current and desired positions
-            //! the current position is given by the particle filter
-            //! the desired position is saved in the sensorimotor path. In our case, it's the estimated state saved in the sensorimotor state
-            void
-            ComputeError(IMC::SensoriMotorState desired_pos, IMC::CorrectedState current_pos, Error *drift)
-            {
-                drift->x = desired_pos.estimatedstate.get()->x - current_pos.x;
-                drift->y = desired_pos.estimatedstate.get()->y - current_pos.y;
-            }
-
 
             //! Main loop.
             void
             onMain(void)
             {
 
-                bool send = true;
-                bool runOnce = true;
+                bool sending_reference = true;
+                bool plan_initialization = false;
+                int iteration = 0;
 
-                Error drift;
-                drift.x = 0.0;
-                drift.y = 0.0;
+                IMC::SensoriMotorState current_trajectory_sms;
+                current_trajectory_sms.clear();
 
-                DUNE::IMC::MessageList<IMC::SensoriMotorState>::const_iterator it;
-                IMC::SensoriMotorState sms;
+                std::vector<IMC::SensoriMotorState>::iterator it;
 
-
-                /*if(CheckingSMP() && Checking())
+                while(!Checking() && !stopping() )
                 {
-                    inf("first reference is set!");
-                    it = smp.data.end();
-                    sms = *(*it);
-                    ComputeError(sms, robot_pos, &drift);
-                    SetReference(sms, drift);
-                    old_robot_pos = robot_pos;
-                }*/
-
-
+                    waitForMessages(1.0);
+                }
 
                 while(!stopping())
                 {
@@ -446,66 +518,71 @@ namespace Navigation
 
                     if(isActive())
                     {
-
                         try
                         {
-
-                            if(runOnce)
+                            if( (recording_enabled == 0) && (trajectory.validation == 1))
                             {
-                                StartPlan();
+                                //Control Mode
 
-
-                                while(!Checking() && !stopping() )
+                                if(plan_initialization == false)
                                 {
-                                    waitForMessages(1.0);
+
+                                    inf("Control beginning");
+                                    StartPlan();
+
+                                    it = trajectory.list_sensorimotor_state.end();
+                                    current_trajectory_sms = *(--it);
+                                    SetReference(current_trajectory_sms);
+
+                                    inf("Current targeted estimated state: %f %f %f",
+                                        current_trajectory_sms.estimatedstate.get()->x,
+                                        current_trajectory_sms.estimatedstate.get()->y,
+                                        current_trajectory_sms.estimatedstate.get()->depth);
+
+                                    sending_reference = true;
+                                    plan_initialization = true;
                                 }
 
-                                    inf("first reference is set!");
-                                    it = smp.data.end();
-                                    inf("%d", (int)smp.data.size());
-
-                                    sms = **(--it);
-
-                                    inf("2");
-                                    ComputeError(sms, robot_pos, &drift);
-                                    inf("3");
-                                    SetReference(sms, drift);
-                                    inf("4");
-                                    old_robot_pos = robot_pos;
-                                    inf("5");
-
-                                    runOnce = false;
-                            }
-
-                            //! Iteration phase
-                            //inf("Iteration %ld", id_iteration);
-
-
-                            if(follow_ref_state.proximity == (follow_ref_state.PROX_XY_NEAR | follow_ref_state.PROX_Z_NEAR))
-                            {
-                                if(it != smp.data.begin())
+                                if(follow_ref_state.proximity == (follow_ref_state.PROX_XY_NEAR | follow_ref_state.PROX_Z_NEAR))
                                 {
-                                    inf("change of target!");
-                                    it--; //target_index = target_index + 1;
-                                    sms = *(*it);
-                                    if(CheckIfNewRobotPos())
+                                    iteration++;
+                                    inf("reference %d reached", iteration);
+
+                                    if(it != trajectory.list_sensorimotor_state.begin())
                                     {
-                                        ComputeError(sms, robot_pos, &drift);
-                                        old_robot_pos = robot_pos;
+                                        current_trajectory_sms = *(--it);
+
+                                        inf("Current targeted estimated state: %f %f %f",
+                                            current_trajectory_sms.estimatedstate.get()->x,
+                                            current_trajectory_sms.estimatedstate.get()->y,
+                                            current_trajectory_sms.estimatedstate.get()->depth);
+
+                                        SetReference(current_trajectory_sms);
                                     }
-                                    SetReference(sms, drift);
+                                    else
+                                    {
+                                        inf("trajectory replayed");
+                                        StopPlan();
+                                        sending_reference = false;
+                                    }
                                 }
-                                else
+
+                                if(sending_reference)
                                 {
-                                    send=false;
+                                    dispatch(&reference);
                                 }
+
+                                DUNE::Time::Delay::wait(1.0);
 
                             }
-                            if(send)
-                                dispatch(&reference);
+                            else
+                            {
+                                // Recorded mode
+                                DUNE::Time::Delay::wait(2.0);
+                                iteration = 0;
+                                plan_initialization = false;
+                            }
 
-                            id_iteration++;
-                            sleep(1);
 
                         }
                         catch (std::exception& e)

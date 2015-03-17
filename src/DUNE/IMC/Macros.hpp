@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
+// IMC XML MD5: 056098284ca5792950614d11821eb2c6                            *
 //***************************************************************************
 
 #ifndef DUNE_IMC_MACROS_HPP_INCLUDED_
@@ -492,8 +492,8 @@
 #define DUNE_IMC_DATAMBS 852
 //! SensoriMotorState identification number.
 #define DUNE_IMC_SENSORIMOTORSTATE 860
-//! SensoriMotorPath identification number.
-#define DUNE_IMC_SENSORIMOTORPATH 861
+//! PathRecorderState identification number.
+#define DUNE_IMC_PATHRECORDERSTATE 861
 //! MessagePart identification number.
 #define DUNE_IMC_MESSAGEPART 877
 //! NeptusBlob identification number.

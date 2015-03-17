@@ -36,17 +36,24 @@ namespace Navigation
     {
         using DUNE_NAMESPACES;
 
+        struct Arguments
+        {
+            //! State of the path recorder
+            std::string state_path_recorder;
+        };
+
         struct Task: public DUNE::Tasks::Task
         {
 
           // IMC received messages
-          IMC::EstimatedState last_es;
-          IMC::EstimatedState es;
-          IMC::DataMBS mbs;
+          IMC::EstimatedState estimated_state;
+          IMC::DataMBS data_mbs;
+          IMC::PathRecorderState path_recorder_state;
+
+          long previous_timestamp;
 
           // IMC sent messages
-          IMC::SensoriMotorState sms;
-          IMC::SensoriMotorPath smp;
+          IMC::SensoriMotorState sensorimotor_state;
 
           //Task phases control
           //! True if task is activating.
@@ -58,7 +65,9 @@ namespace Navigation
           //! Activation/deactivation timer.
           Counter<double> m_countdown;
 
-          bool FirstIteration;
+          // Parameters Config Structure
+          //! Task arguments.
+          Arguments m_args;
 
           //! Constructor.
           //! @param[in] name task name.
@@ -68,18 +77,37 @@ namespace Navigation
             m_activating(false),
             m_deactivating(false)
           {
-
               // Activation parameter on Neptus
               paramActive(Tasks::Parameter::SCOPE_MANEUVER,
                           Tasks::Parameter::VISIBILITY_USER);
 
+              param(DTR_RT("State"), m_args.state_path_recorder)
+               .values(DTR_RT("Start, Stop"))
+               .defaultValue("Stop")
+               .description(DTR("State of the path recorder"))
+               .visibility(Tasks::Parameter::VISIBILITY_USER)
+               .scope(Tasks::Parameter::SCOPE_MANEUVER);
+
               // Initialize messages.
               clearMessages();
+
+              previous_timestamp = -1;
+
+              if(strcmp(m_args.state_path_recorder.c_str(),"Start")==0)
+              {
+                  path_recorder_state.state = "Start";
+                  path_recorder_state.id = 1;
+              }
+
+              if(strcmp(m_args.state_path_recorder.c_str(),"Stop")==0)
+              {
+                  path_recorder_state.state = "Stop";
+                  path_recorder_state.id = 0;
+              }
 
               // List of message consume by the sensorimotor controller
               bind<IMC::EstimatedState>(this);
               bind<IMC::DataMBS>(this);
-
 
           }
 
@@ -87,28 +115,15 @@ namespace Navigation
           void
           clearMessages(void)
           {
-              es.clear();
-              last_es.clear();
-              mbs.clear();
+              estimated_state.clear();
+              data_mbs.clear();
           }
-
-
-          //! Test if the new estimated state is a new position
-          bool
-          TestIfNewPosition(IMC::EstimatedState es1, IMC::EstimatedState es2)
-          {
-              if(es1 == es2)
-                  return false;
-
-              return true;
-          }
-
 
           //! Consume Estimated Position message
           void
           consume(const IMC::EstimatedState* msg)
           {
-              es = *msg;
+              estimated_state = *msg;
           }
 
 
@@ -116,7 +131,7 @@ namespace Navigation
           void
           consume(const IMC::DataMBS* msg)
           {
-              mbs = *msg;
+              data_mbs = *msg;
           }
 
 
@@ -125,7 +140,7 @@ namespace Navigation
           Checking()
           {
               // IMC message getting checking
-              if(es.getTimeStamp() == -1)      {return false;}
+              if(estimated_state.getTimeStamp() == -1)      {return false;}
 
               // All is ok
               return true;
@@ -135,6 +150,17 @@ namespace Navigation
           void
           onUpdateParameters(void)
           {
+              if(strcmp(m_args.state_path_recorder.c_str(),"Start")==0)
+              {
+                  path_recorder_state.state = "Start";
+                  path_recorder_state.id = 1;
+              }
+
+              if(strcmp(m_args.state_path_recorder.c_str(),"Stop")==0)
+              {
+                  path_recorder_state.state = "Stop";
+                  path_recorder_state.id = 0;
+              }
           }
 
           //! Reserve entity identifiers.
@@ -194,9 +220,6 @@ namespace Navigation
           void
           onRequestDeactivation(void)
           {
-              inf("Dispatching the sensorimotor path...");
-              dispatch(smp);
-
               inf("Cleaning data phase done");
               m_deactivating = true;
               m_countdown.setTop(10);
@@ -240,69 +263,70 @@ namespace Navigation
               }
           }
 
-
-          /*//! Set the WGS-84 state message
-          void
-          SetWGS84State(void)
-          {
-              float lat0 = es.lat;
-              float lon0 = es.lon;
-              WGS84::displace(es.x, es.y, &lat0, &lon0);
-              wgsstate.lat = lat0;
-              wgsstate.lon = lon0;
-          }*/
-
-
-
-          //! Set the sensorimotor state mesage
+          //! Set the sensorimotor state message
           void
           SetSensorimotorState(void)
           {
-              sms.estimatedstate.set(es);
-              sms.datambs.set(mbs);
+              sensorimotor_state.estimatedstate.set(estimated_state);
+              sensorimotor_state.datambs.set(data_mbs);
           }
 
-
-          //! Add the new sensorimotor position to the sensorimotor path
+          //! Dispatch sensorimotor position
           void
-          AddPositionToPath()
+          DispatchPosition()
           {
               SetSensorimotorState();
-              smp.data.push_back(sms);
+              dispatch(sensorimotor_state);
+              inf("Estimated State x: %f, y: %f, z: %f",
+                    sensorimotor_state.estimatedstate.get()->x,
+                    sensorimotor_state.estimatedstate.get()->y,
+                    sensorimotor_state.estimatedstate.get()->depth);
           }
-
 
           //! Main loop.
           void
           onMain(void)
           {
-              FirstIteration = true;
-              int iteration = 0;
+
+            int iteration = 0;
+            bool flag_path_validation =  false;
 
             while (!stopping())
             {
 
-                if(isActive() & Checking())
+                if(isActive() && Checking())
                 {
-                    //inf("iteration %d", iteration);
-
                     consumeMessages();
 
-                    if(FirstIteration)
+                    if(path_recorder_state.id == 1)
                     {
-                        last_es = es;
-                        AddPositionToPath();
-                        FirstIteration = false;
+                        if(flag_path_validation == false)
+                        {
+                            iteration = 0;
+                            dispatch(path_recorder_state);
+                            flag_path_validation = true;
+                            inf("Path Recorder Start");
+                        }
+
+                        if(estimated_state.getTimeStamp() > previous_timestamp)
+                        {
+                            previous_timestamp = estimated_state.getTimeStamp();
+                            DispatchPosition();
+                            inf("iteration %d", iteration);
+                            iteration ++;
+                        }
+                    }
+                    else if(path_recorder_state.id == 0)
+                    {
+                        if(flag_path_validation == true)
+                        {
+                            dispatch(path_recorder_state);
+                            inf("Path Recorder Stop");
+                            flag_path_validation = false;
+                        }
                     }
 
-                    if(TestIfNewPosition(es, last_es))
-                    {
-                        AddPositionToPath();
-                        last_es = es;
-                    }
-
-                    iteration ++;
-                    sleep(0.5);
+                    DUNE::Time::Delay::wait(1.0);
                 }
                 else
                 {
@@ -318,6 +342,8 @@ namespace Navigation
                     }
                 }
             }
+
+            //Cleaning
         }
 
       };

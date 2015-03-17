@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
+// IMC XML MD5: 056098284ca5792950614d11821eb2c6                            *
 //***************************************************************************
 
 // ISO C++ 98 headers.
@@ -19340,91 +19340,78 @@ namespace DUNE
       }
     }
 
-    SensoriMotorPath::SensoriMotorPath(void)
+    PathRecorderState::PathRecorderState(void)
     {
       m_header.mgid = 861;
       clear();
-      data.setParent(this);
     }
 
     void
-    SensoriMotorPath::clear(void)
+    PathRecorderState::clear(void)
     {
-      data.clear();
+      state.clear();
+      id = 0;
     }
 
     bool
-    SensoriMotorPath::fieldsEqual(const Message& msg__) const
+    PathRecorderState::fieldsEqual(const Message& msg__) const
     {
-      const IMC::SensoriMotorPath& other__ = static_cast<const SensoriMotorPath&>(msg__);
-      if (data != other__.data) return false;
+      const IMC::PathRecorderState& other__ = static_cast<const PathRecorderState&>(msg__);
+      if (state != other__.state) return false;
+      if (id != other__.id) return false;
       return true;
     }
 
     int
-    SensoriMotorPath::validate(void) const
+    PathRecorderState::validate(void) const
     {
       return false;
     }
 
     uint8_t*
-    SensoriMotorPath::serializeFields(uint8_t* bfr__) const
+    PathRecorderState::serializeFields(uint8_t* bfr__) const
     {
       uint8_t* ptr__ = bfr__;
-      ptr__ += data.serialize(ptr__);
+      ptr__ += IMC::serialize(state, ptr__);
+      ptr__ += IMC::serialize(id, ptr__);
       return ptr__;
     }
 
     uint16_t
-    SensoriMotorPath::deserializeFields(const uint8_t* bfr__, uint16_t size__)
+    PathRecorderState::deserializeFields(const uint8_t* bfr__, uint16_t size__)
     {
       const uint8_t* start__ = bfr__;
-      bfr__ += data.deserialize(bfr__, size__);
+      bfr__ += IMC::deserialize(state, bfr__, size__);
+      bfr__ += IMC::deserialize(id, bfr__, size__);
       return bfr__ - start__;
     }
 
     uint16_t
-    SensoriMotorPath::reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__)
+    PathRecorderState::reverseDeserializeFields(const uint8_t* bfr__, uint16_t size__)
     {
       const uint8_t* start__ = bfr__;
-      bfr__ += data.reverseDeserialize(bfr__, size__);
+      bfr__ += IMC::reverseDeserialize(state, bfr__, size__);
+      bfr__ += IMC::deserialize(id, bfr__, size__);
       return bfr__ - start__;
     }
 
-    void
-    SensoriMotorPath::fieldsToJSON(std::ostream& os__, unsigned nindent__) const
+    uint16_t
+    PathRecorderState::getSubId(void) const
     {
-      data.toJSON(os__, "data", nindent__);
+      return id;
     }
 
     void
-    SensoriMotorPath::setTimeStampNested(double value__)
+    PathRecorderState::setSubId(uint16_t subid)
     {
-      data.setTimeStamp(value__);
+      id = (uint8_t)subid;
     }
 
     void
-    SensoriMotorPath::setSourceNested(uint16_t value__)
+    PathRecorderState::fieldsToJSON(std::ostream& os__, unsigned nindent__) const
     {
-      data.setSource(value__);
-    }
-
-    void
-    SensoriMotorPath::setSourceEntityNested(uint8_t value__)
-    {
-      data.setSourceEntity(value__);
-    }
-
-    void
-    SensoriMotorPath::setDestinationNested(uint16_t value__)
-    {
-      data.setDestination(value__);
-    }
-
-    void
-    SensoriMotorPath::setDestinationEntityNested(uint8_t value__)
-    {
-      data.setDestinationEntity(value__);
+      IMC::toJSON(os__, "state", state, nindent__);
+      IMC::toJSON(os__, "id", id, nindent__);
     }
 
     MessagePart::MessagePart(void)

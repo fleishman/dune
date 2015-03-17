@@ -26,7 +26,7 @@
 //***************************************************************************
 // Automatically generated.                                                 *
 //***************************************************************************
-// IMC XML MD5: 2d4515a60e0f62c97327dee68618cad4                            *
+// IMC XML MD5: 056098284ca5792950614d11821eb2c6                            *
 //***************************************************************************
 
 #ifndef DUNE_IMC_DEFINITIONS_HPP_INCLUDED_
@@ -18399,12 +18399,14 @@ namespace DUNE
       setDestinationEntityNested(uint8_t value__);
     };
 
-    //! Sensori-Motor Path.
-    class SensoriMotorPath: public Message
+    //! PathRecorderState.
+    class PathRecorderState: public Message
     {
     public:
-      //! Path.
-      MessageList<SensoriMotorState> data;
+      //! State.
+      std::string state;
+      //! Id.
+      uint8_t id;
 
       static uint16_t
       getIdStatic(void)
@@ -18412,12 +18414,12 @@ namespace DUNE
         return 861;
       }
 
-      SensoriMotorPath(void);
+      PathRecorderState(void);
 
       Message*
       clone(void) const
       {
-        return new SensoriMotorPath(*this);
+        return new PathRecorderState(*this);
       }
 
       void
@@ -18441,45 +18443,35 @@ namespace DUNE
       uint16_t
       getId(void) const
       {
-        return SensoriMotorPath::getIdStatic();
+        return PathRecorderState::getIdStatic();
       }
 
       const char*
       getName(void) const
       {
-        return "SensoriMotorPath";
+        return "PathRecorderState";
       }
 
       unsigned
       getFixedSerializationSize(void) const
       {
-        return 0;
+        return 1;
       }
 
       unsigned
       getVariableSerializationSize(void) const
       {
-        return data.getSerializationSize();
+        return IMC::getSerializationSize(state);
       }
+
+      uint16_t
+      getSubId(void) const;
+
+      void
+      setSubId(uint16_t subid);
 
       void
       fieldsToJSON(std::ostream& os__, unsigned nindent__) const;
-
-    protected:
-      void
-      setTimeStampNested(double value__);
-
-      void
-      setSourceNested(uint16_t value__);
-
-      void
-      setSourceEntityNested(uint8_t value__);
-
-      void
-      setDestinationNested(uint16_t value__);
-
-      void
-      setDestinationEntityNested(uint8_t value__);
     };
 
     //! Message Fragment.

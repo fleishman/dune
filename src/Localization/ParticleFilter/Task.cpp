@@ -63,6 +63,13 @@ namespace Localization
         double time_heightoffset;
     };
 
+    struct DVL_Entities
+    {
+        int num_beam;
+        std::string *label;
+        u_int8_t *id;
+    };
+
     u_int64_t timestart;
     u_int64_t timestop;
     u_int64_t id_iteration;
@@ -102,6 +109,9 @@ namespace Localization
         //! Task arguments.
         Arguments m_args;
 
+        //! Dvl entities
+        DVL_Entities m_dvl_entity;
+
         // Particle filter
         //! Filter Parameters definition
         Filter_SIR_Properties m_filter_sir_properties;
@@ -120,7 +130,7 @@ namespace Localization
         int m_filter_kind;
 
         // First iteration after activation
-        bool first_iteration;
+        bool first_iteration;       
 
         //! Constructor.
         //! @param[in] name task name.
@@ -194,6 +204,22 @@ namespace Localization
              .description(DTR("Time use during the scan of height offset"))
              .visibility(Tasks::Parameter::VISIBILITY_USER)
              .scope(Tasks::Parameter::SCOPE_MANEUVER);
+
+            // Dvl entity memory allocation
+            m_dvl_entity.num_beam = 4;
+            m_dvl_entity.label = new std::string[4];
+            m_dvl_entity.id = (u_int8_t*)malloc(m_dvl_entity.num_beam*sizeof*m_dvl_entity.id);
+
+            // Intialisation of entity solving list
+            m_dvl_entity.label[0] = "DVL Beam 0";
+            m_dvl_entity.label[1] = "DVL Beam 1";
+            m_dvl_entity.label[2] = "DVL Beam 2";
+            m_dvl_entity.label[3] = "DVL Beam 3";
+
+            m_dvl_entity.id[0] = -1;
+            m_dvl_entity.id[1] = -1;
+            m_dvl_entity.id[2] = -1;
+            m_dvl_entity.id[3] = -1;
 
             // Initialize messages.
             clearMessages();
@@ -361,10 +387,10 @@ namespace Localization
             if(m_filter_kind==0 || m_filter_kind==1)
             {
                 // Get the DVL distance for each beam by its identifier
-                if(msg->getSourceEntity() == 67)    {m_ray[0].range = msg->value;}
-                if(msg->getSourceEntity() == 68)    {m_ray[1].range = msg->value;}
-                if(msg->getSourceEntity() == 69)    {m_ray[2].range = msg->value;}
-                if(msg->getSourceEntity() == 70)    {m_ray[3].range = msg->value;}
+                if(msg->getSourceEntity() == m_dvl_entity.id[0])    {m_ray[0].range = msg->value;}
+                if(msg->getSourceEntity() == m_dvl_entity.id[1])    {m_ray[1].range = msg->value;}
+                if(msg->getSourceEntity() == m_dvl_entity.id[2])    {m_ray[2].range = msg->value;}
+                if(msg->getSourceEntity() == m_dvl_entity.id[3])    {m_ray[3].range = msg->value;}
 
                 /*
                 inf("DVL: B0 %f m - B1 %f m - B2 %f m - B3 %f m",
@@ -444,6 +470,19 @@ namespace Localization
         void
         onEntityResolution(void)
         {
+            // Check the entity id of the Dvl beams
+            try
+            {
+                for(int n=0;n<m_dvl_entity.num_beam;n++)
+                {
+                    m_dvl_entity.id[n] = resolveEntity(m_dvl_entity.label[n]);
+                    //inf("%d", (int)m_dvl_entity.id[n] );
+                }
+            }
+            catch (std::runtime_error& e)
+            {
+              war(DTR("failed to resolve entity '%s': %s"), "Dvl Beam 0-3", e.what());
+            }
         }
 
         //! Acquire resources.
