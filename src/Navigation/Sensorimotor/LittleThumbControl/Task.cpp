@@ -421,8 +421,8 @@ namespace Navigation
                 reference.lon = lon0;
 
                 reference.flags = IMC::Reference::FLAG_LOCATION;
-                SetDesiredSpeed(state.v);
-                SetDesiredZ(z);
+                SetDesiredSpeed(1.0);
+                SetDesiredZ(state.depth);
                 //reference.radius = 1;
 
             }
@@ -469,6 +469,18 @@ namespace Navigation
                 plan_specification.start_man_id = "sensorimotorcontrol";
                 plan_specification.maneuvers.push_back(plan_maneuver);
 
+                // Self activation.
+                IMC::SetEntityParameters sep;
+                sep.name = getEntityLabel();
+                IMC::EntityParameter ep;
+                ep.name = "Active";
+                ep.value = "true";
+                sep.params.push_back(ep);
+                ep.name = "State";
+                ep.value = "Start";
+                sep.params.push_back(ep);
+                plan_specification.start_actions.push_back(sep);
+
                 //IMC::PlanControl pc_on;
                 plan_control_on.type = IMC::PlanControl::PC_REQUEST;
                 plan_control_on.op = IMC::PlanControl::PC_START;
@@ -487,7 +499,7 @@ namespace Navigation
             {
                 inf("Stop the plan with the follow reference maneuver!");
                 plan_control_off.type = IMC::PlanControl::PC_REQUEST;
-                plan_control_off.op = IMC::PlanControl::PC_START;
+                plan_control_off.op = IMC::PlanControl::PC_STOP;
                 plan_control_off.plan_id = "sensorimotor_plan";
 
                 dispatch(plan_control_off);
