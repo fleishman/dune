@@ -22,7 +22,7 @@
 // language governing permissions and limitations at                        *
 // https://www.lsts.pt/dune/licence.                                        *
 //***************************************************************************
-// Author: Jano Yazbeck                                                         *
+// Author: Jano Yazbeck                                                     *
 //***************************************************************************
 
 // DUNE headers.

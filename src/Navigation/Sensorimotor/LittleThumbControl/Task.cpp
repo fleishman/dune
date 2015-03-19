@@ -46,6 +46,12 @@ namespace Navigation
         {
             //! State of the path recorder
             std::string state_little_thumb_control;
+
+            //! Honrizontal distance of follow reference
+            double max_distance_follow_ref_xy;
+
+            //! Vertical distance of follow reference
+            double max_distance_follow_ref_z;
         };
 
         struct Position
@@ -154,6 +160,18 @@ namespace Navigation
                  .values(DTR_RT("Start, Stop"))
                  .defaultValue("Stop")
                  .description(DTR("State of the path recorder"))
+                 .visibility(Tasks::Parameter::VISIBILITY_USER)
+                 .scope(Tasks::Parameter::SCOPE_MANEUVER);
+
+                param(DTR_RT("Horizontal Distance"), m_args.max_distance_follow_ref_xy)
+                 .defaultValue("15.0")
+                 .description(DTR("Horizontal Distance maximum for follow reference"))
+                 .visibility(Tasks::Parameter::VISIBILITY_USER)
+                 .scope(Tasks::Parameter::SCOPE_MANEUVER);
+
+                param(DTR_RT("Vertical Distance"), m_args.max_distance_follow_ref_z)
+                 .defaultValue("1.0")
+                 .description(DTR("Vertical Distance maximum for follow reference"))
                  .visibility(Tasks::Parameter::VISIBILITY_USER)
                  .scope(Tasks::Parameter::SCOPE_MANEUVER);
 
@@ -412,7 +430,10 @@ namespace Navigation
                 IMC::EstimatedState state = *(sms.estimatedstate.get());
                 float x = state.x + drift.x;
                 float y = state.y + drift.y;
-                float z = state.z + drift.z;
+
+                // Depth is already good
+                //float z = state.z + drift.z;
+
                 float lat0 = state.lat;
                 float lon0 = state.lon;
 
@@ -462,11 +483,11 @@ namespace Navigation
 
                 //IMC::PlanManeuver pm;
                 plan_maneuver.data.set(follow_reference);
-                plan_maneuver.maneuver_id = "sensorimotorcontrol";
+                plan_maneuver.maneuver_id = "littlethumbcontrol";
 
                 //IMC::PlanSpecification ps;
-                plan_specification.plan_id = "sensorimotor_plan";
-                plan_specification.start_man_id = "sensorimotorcontrol";
+                plan_specification.plan_id = "littlethumbcontrol_plan";
+                plan_specification.start_man_id = "littlethumbcontrol";
                 plan_specification.maneuvers.push_back(plan_maneuver);
 
                 // Self activation.
@@ -484,7 +505,7 @@ namespace Navigation
                 //IMC::PlanControl pc_on;
                 plan_control_on.type = IMC::PlanControl::PC_REQUEST;
                 plan_control_on.op = IMC::PlanControl::PC_START;
-                plan_control_on.plan_id = "sensorimotor_plan";
+                plan_control_on.plan_id = "littlethumbcontrol_plan";
                 plan_control_on.arg.set(plan_specification);
                 plan_control_on.request_id = 0;
                 plan_control_on.flags = 0;
@@ -513,6 +534,8 @@ namespace Navigation
                 bool sending_reference = true;
                 bool plan_initialization = false;
                 int iteration = 0;
+                double checking_distance_xy = 0;
+                double checking_distance_z = 0;
 
                 IMC::SensoriMotorState current_trajectory_sms;
                 current_trajectory_sms.clear();
@@ -562,7 +585,25 @@ namespace Navigation
 
                                     if(it != trajectory.list_sensorimotor_state.begin())
                                     {
-                                        current_trajectory_sms = *(--it);
+
+                                        checking_distance_xy = 0;
+                                        checking_distance_z = 0;
+
+                                        while( (checking_distance_xy<m_args.max_distance_follow_ref_xy
+                                              || checking_distance_z<m_args.max_distance_follow_ref_z)
+                                              && it != trajectory.list_sensorimotor_state.begin()
+                                              && !stopping() )
+                                        {
+                                            current_trajectory_sms = *(--it);
+
+                                            checking_distance_xy =(current_trajectory_sms.estimatedstate.get()->x - estimated_state.x)
+                                               *(current_trajectory_sms.estimatedstate.get()->x - estimated_state.x)
+                                               +(current_trajectory_sms.estimatedstate.get()->y - estimated_state.y)
+                                               *(current_trajectory_sms.estimatedstate.get()->y - estimated_state.y);
+
+                                            checking_distance_z =(current_trajectory_sms.estimatedstate.get()->depth - estimated_state.depth)
+                                               *(current_trajectory_sms.estimatedstate.get()->depth - estimated_state.depth);
+                                        }
 
                                         inf("Current targeted estimated state: %f %f %f",
                                             current_trajectory_sms.estimatedstate.get()->x,
@@ -570,6 +611,7 @@ namespace Navigation
                                             current_trajectory_sms.estimatedstate.get()->depth);
 
                                         SetReference(current_trajectory_sms);
+
                                     }
                                     else
                                     {
