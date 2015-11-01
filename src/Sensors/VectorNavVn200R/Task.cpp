@@ -543,7 +543,7 @@ namespace Sensors
                             BINARY_ASYNC_MODE_SERIAL_1,
 
                             // INS rate of binary outputting data at 80 Hz (800 Hz on-board filter / n)
-                            10,
+                            50,
 
                             // Activation of Data from the Common Group
                             BG1_ANGULAR_RATE,
